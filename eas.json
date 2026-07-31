@@ -4,25 +4,56 @@
   },
   "build": {
     "development": {
+      "environment": "development",
       "developmentClient": true,
-      "distribution": "internal",
-      "env": {
-        "NATIVE_SDK_BUILD": "1"
-      }
-    },
-    "preview": {
       "distribution": "internal",
       "env": {
         "NATIVE_SDK_BUILD": "1"
       },
       "android": {
-        "buildType": "apk"
+        "env": {
+          "NATIVE_BUILD_PLATFORM": "android"
+        }
+      },
+      "ios": {
+        "env": {
+          "NATIVE_BUILD_PLATFORM": "ios"
+        }
+      }
+    },
+    "preview": {
+      "environment": "preview",
+      "distribution": "internal",
+      "env": {
+        "NATIVE_SDK_BUILD": "1"
+      },
+      "android": {
+        "buildType": "apk",
+        "env": {
+          "NATIVE_BUILD_PLATFORM": "android"
+        }
+      },
+      "ios": {
+        "env": {
+          "NATIVE_BUILD_PLATFORM": "ios"
+        }
       }
     },
     "production": {
+      "environment": "production",
       "autoIncrement": true,
       "env": {
         "NATIVE_SDK_BUILD": "1"
+      },
+      "android": {
+        "env": {
+          "NATIVE_BUILD_PLATFORM": "android"
+        }
+      },
+      "ios": {
+        "env": {
+          "NATIVE_BUILD_PLATFORM": "ios"
+        }
       }
     }
   }

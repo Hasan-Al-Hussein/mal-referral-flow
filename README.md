@@ -5,7 +5,7 @@ A production-shaped React Native prototype for generating, sharing, resolving, a
 The project has two deliberately separate execution modes:
 
 - **Credential-free web reviewer build:** exercises the complete referral state machine, validation, routing, persistence, failure handling, and analytics contract without external accounts.
-- **Custom native build:** swaps in the real Branch React Native SDK, React Native Firebase Analytics, and the operating system share sheet.
+- **Custom native build configuration:** is prepared to swap in the real Branch React Native SDK, React Native Firebase Analytics, and the operating system share sheet. No native binary or provider-backed device run is claimed in this repository evidence.
 
 The web build is useful, interactive evidence of application behavior. It is **not** presented as proof of Android App Links, iOS Universal Links, or a store-to-install-to-first-launch handoff. Those claims require the native test matrix documented below.
 
@@ -20,7 +20,7 @@ For the detailed design and reliability analysis, see [docs/ARCHITECTURE.md](doc
 | --- | --- |
 | Live web reviewer build | [hasan-al-hussein.github.io/mal-referral-flow](https://hasan-al-hussein.github.io/mal-referral-flow/) |
 | Android preview APK | Not included — requires reviewer-safe Branch/Firebase test credentials |
-| Screen-recorded native walkthrough | Not needed — the live reviewer build is supplied |
+| Screen-recorded native walkthrough | Not supplied — the live URL is a web simulator, not native proof |
 | GitHub repository | [github.com/Hasan-Al-Hussein/mal-referral-flow](https://github.com/Hasan-Al-Hussein/mal-referral-flow) |
 
 ## Five-minute reviewer path
@@ -28,10 +28,10 @@ For the detailed design and reliability analysis, see [docs/ARCHITECTURE.md](doc
 The credential-free web path requires no sign-in, Branch account, Firebase project, or device installation.
 
 1. Open the live web URL above, or run the project locally with `npm ci && npm run web`.
-2. Select **Generate my referral link**. A stable member code and shareable review URL are produced; `referral_link_generated` appears in the event ledger.
+2. Select **Generate my referral link**. A stable code for the current demo epoch and a shareable review URL are produced; `referral_link_generated` appears in the event ledger.
 3. Select **Share my invitation**. A supported browser opens Web Share; otherwise the full invite is copied. The ledger records the actual outcome rather than assuming success.
 4. Select **Direct open**. The Branch-shaped payload passes through the production parser and coordinator, then opens onboarding with the referral code visible and locked.
-5. Enter a name and email, then select **Create demo account**. The code is frozen when signup starts and completion is emitted only after the mock endpoint accepts it.
+5. Enter a name and email, then select **Create demo account**. The persisted attribution identity is frozen when signup starts and completion is emitted only after the mock endpoint accepts it.
 6. Select **Run the flow again**. The app clears persisted and visible journey state, remounts a fresh Invite screen at `0/5`, and restores **Generate my referral link**. Generate, share, then try **Deferred first launch**; onboarding should open at `3/5`, use the same ingestion path with `+is_first_session=true`, and identify the source as `demo-deferred`.
 7. Select **Invalid payload** to verify safe rejection and the failure events without unintended navigation.
 
@@ -46,7 +46,7 @@ Useful edge-case checks:
 ### Implemented in this repository
 
 - [x] Mock authenticated-member referral screen
-- [x] Stable per-member referral code persisted with AsyncStorage
+- [x] Stable per-member referral code persisted within an ordinary restartable demo epoch
 - [x] Cryptographically random, human-readable `MAL-XXXXXXXX` demo-code generation
 - [x] Concurrent per-member generation coalescing and corrupt-code/URL rejection
 - [x] Real Branch Universal Object and `generateShortUrl()` call shape in the native adapter
@@ -55,11 +55,11 @@ Useful edge-case checks:
 - [x] Direct and deferred attribution through one strict parser/coordinator path
 - [x] Referral code pre-applied and locked during referred onboarding
 - [x] Pending attribution persisted before analytics or navigation
-- [x] Referral code frozen once signup begins
+- [x] Full originating attribution identity (code, fingerprint, timestamp) frozen once signup begins
 - [x] Durable callback and funnel-milestone deduplication
 - [x] Serialized callback/signup transitions and validated 30-day pending-attribution recovery
 - [x] All five required funnel events with referral code and platform context
-- [x] Durable analytics outbox with stable event IDs for adapter-level retry
+- [x] Durable analytics outbox with collision-resistant 128-bit event IDs that remain stable for one retry record
 - [x] Explicit generation, share, deep-link, code, signup, and duplicate diagnostics
 - [x] Firebase Analytics modular API in the native adapter
 - [x] Visible credential-free event ledger for reviewer verification
@@ -69,6 +69,9 @@ Useful edge-case checks:
 - [x] Customer-first mobile layout with reviewer mechanics progressively disclosed
 - [x] Mock signup acceptance and deterministic `+fail` rejection fixture
 - [x] Stable mock signup idempotency keys and persisted non-PII acceptance receipts
+- [x] Atomic mock receipt creation across API instances and canonical case/whitespace handling
+- [x] Reset lifecycle epochs that isolate delayed old writes from a fresh journey
+- [x] Persisted, journey-scoped accepted-milestone hydration after a cold restart
 - [x] CI entry point for type checking, linting, tests, and a web export
 
 ### External proof/configuration still required
@@ -200,7 +203,7 @@ Primary implementation files:
 - [`src/services/deepLinks/deepLinkService.native.ts`](src/services/deepLinks/deepLinkService.native.ts) — Branch integration
 - [`src/services/deepLinks/deepLinkService.ts`](src/services/deepLinks/deepLinkService.ts) — reviewer-link adapter
 - [`src/services/analytics/AnalyticsTracker.ts`](src/services/analytics/AnalyticsTracker.ts) — event contract and milestone dedupe
-- [`src/services/storage/referralStorage.ts`](src/services/storage/referralStorage.ts) — pending attribution, frozen code, and durable receipts
+- [`src/services/storage/referralStorage.ts`](src/services/storage/referralStorage.ts) — epoch-scoped journey identity, analytics state, and durable receipts
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — full reliability, rollout, privacy, and production analysis
 
 ## Credential-free web setup
@@ -274,19 +277,25 @@ Copy-Item .env.example .env.local
 | Variable | Required for | Meaning |
 | --- | --- | --- |
 | `NATIVE_SDK_BUILD=1` | Any native provider build | Enables native config plugins and build-time settings |
+| `NATIVE_BUILD_PLATFORM` | Local config/prebuild | `android`, `ios`, or `all`; EAS profiles set it per platform because `EAS_BUILD_PLATFORM` is worker-only |
 | `EXPO_PUBLIC_BRANCH_KEY` | Branch native build | Branch test/live key embedded in the app; it is public by design |
 | `EXPO_PUBLIC_BRANCH_DOMAIN` | Branch native build | Primary Branch link host, without `https://` |
 | `EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN` | Recommended | Alternate Branch link host used by App/Universal Links |
-| `GOOGLE_SERVICES_JSON` | Firebase native build | Local path or EAS file-variable path for Android config |
-| `GOOGLE_SERVICES_PLIST` | Firebase native build | Local path or EAS file-variable path for iOS config |
+| `GOOGLE_SERVICES_JSON` | Android Firebase build | Local path or EAS file-variable path for Android config |
+| `GOOGLE_SERVICES_PLIST` | iOS Firebase build | Local path or EAS file-variable path for iOS config |
 | `EAS_PROJECT_ID` | EAS services | Expo project UUID used by build/update/hosting services |
 
-The shared config requires the Branch key/domain and both Firebase service-file paths whenever `NATIVE_SDK_BUILD=1`. It fails configuration immediately when any required provider value is absent, rather than producing a native binary with silently omitted integrations. Both service-file paths are required even for a one-platform build so the generated cross-platform configuration remains deterministic.
+The config always requires the public Branch key/domain in native mode. Firebase validation is platform-specific: Android needs only the JSON file and iOS needs only the plist. A deliberate `all` probe needs both.
+
+Dynamic app config is evaluated in two places. Locally, `EAS_BUILD_PLATFORM` and secret EAS file variables are unavailable, so the committed build profiles set `NATIVE_BUILD_PLATFORM` per platform and config falls back to the conventional ignored files `./google-services.json` or `./GoogleService-Info.plist`. On an EAS worker, `EAS_BUILD_PLATFORM` selects the platform and the matching EAS file variable must resolve to its uploaded temporary path; missing worker credentials fail fast. `expo config --type public` proves only config evaluation. It does not prove config-plugin mods, Prebuild output, native compilation, signing, or SDK startup.
+
+This follows Expo's documented [EAS environment-variable model](https://docs.expo.dev/eas/environment-variables/), including worker-provided file paths and explicit build-profile environments.
 
 Example `.env.local` shape:
 
 ```dotenv
 NATIVE_SDK_BUILD=1
+NATIVE_BUILD_PLATFORM=android
 EXPO_PUBLIC_BRANCH_KEY=key_test_REPLACE_ME
 EXPO_PUBLIC_BRANCH_DOMAIN=your-app.test-app.link
 EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN=your-app-alternate.test-app.link
@@ -317,16 +326,17 @@ npx eas-cli@latest login
 npx eas-cli@latest init
 ```
 
-Store provider values in the EAS `preview` environment:
+The committed profile selects the EAS `preview` environment. Store the public Branch values and the Android Firebase file there:
 
 ```powershell
 npx eas-cli@latest env:set preview --name EXPO_PUBLIC_BRANCH_KEY --value key_test_REPLACE_ME --type string --visibility plaintext
 npx eas-cli@latest env:set preview --name EXPO_PUBLIC_BRANCH_DOMAIN --value your-app.test-app.link --type string --visibility plaintext
 npx eas-cli@latest env:set preview --name EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN --value your-app-alternate.test-app.link --type string --visibility plaintext
 npx eas-cli@latest env:set preview --name GOOGLE_SERVICES_JSON --value .\google-services.json --type file --visibility secret
-npx eas-cli@latest env:set preview --name GOOGLE_SERVICES_PLIST --value .\GoogleService-Info.plist --type file --visibility secret
 npx eas-cli@latest env:set preview --name EAS_PROJECT_ID --value YOUR_EXPO_PROJECT_UUID --type string --visibility plaintext
 ```
+
+For an iOS build, upload `GOOGLE_SERVICES_PLIST` to the selected environment instead. EAS injects a temporary worker path into the environment variable; do not expect a secret file variable to be readable during a local `expo config` command. The local ignored-file fallback exists for that evaluation path. The `development`, `preview`, and `production` profiles explicitly select their same-named EAS environments.
 
 Build:
 
@@ -362,7 +372,7 @@ Every required success event carries the same typed context:
 | --- | --- | --- |
 | `referral_code` | string | Normalized referral identity (`MAL-XXXXXXXX`) |
 | `platform` | string | `android`, `ios`, `web`, or supported runtime fallback |
-| `event_id` | string | Stable ID for downstream deduplication |
+| `event_id` | string | Random 128-bit ID that remains stable for retries of one outbox record |
 | `flow_id` | string | Correlates the referrer or invitee journey |
 | `schema_version` | `1` | Makes contract evolution explicit |
 | `app_version` | string | Separates behavior by shipped app version |
@@ -380,7 +390,7 @@ Every required success event carries the same typed context:
 | `referral_link_generated` | A stable code and usable Branch/reviewer URL have both resolved |
 | `referral_link_shared` | The platform share operation reports a successful handoff |
 | `referral_link_clicked` | A valid, non-duplicate attribution callback is persisted and accepted |
-| `referral_signup_started` | Referred onboarding starts and its code is frozen |
+| `referral_signup_started` | Referred onboarding starts and its persisted attribution identity is frozen |
 | `referral_signup_completed` | The mock account and referral acceptance both succeed |
 
 All five success events require a real, non-empty referral code plus platform context. Screen remounts and callback replays cannot re-emit a completed milestone for the same flow.
@@ -393,6 +403,7 @@ All five success events require a real, non-empty referral code plus platform co
 - `referral_deeplink_resolution_failed`
 - `referral_code_rejected`
 - `referral_signup_failed`
+- `referral_state_cleanup_failed`
 - `referral_duplicate_suppressed`
 
 Failure events include the referral code when it has passed strict validation and a bounded allowlisted `reason`. A failure before code creation uses `UNAVAILABLE`; malformed untrusted input uses `INVALID`, so raw URLs, email-like strings, provider errors, and form data do not become analytics parameters.
@@ -419,7 +430,7 @@ npm run build:web
 
 GitHub Actions runs the same checks on pushes to `main` and on pull requests. Native verification remains separate because it requires provider credentials, signing identities, physical devices, and store/install state.
 
-The rendered reviewer build was also checked at 375 x 812, 812 x 375, and 1440 x 1000 in light and dark themes. The full deferred journey was verified at `3/5` on onboarding and `5/5` on completion, and **Run the flow again** was regression-checked to restore a new Invite route at `0/5` with no stale rendered journey; generating again may return the same stable member code by design. The reduced-motion path was verified with `prefers-reduced-motion: reduce`; content remains immediately visible and navigation animation is disabled.
+The rendered web reviewer build was also checked at 375 x 812, 812 x 375, and 1440 x 1000 in light and dark themes. The full simulated deferred journey was verified at `3/5` on onboarding and `5/5` on completion, and **Run the flow again** was regression-checked to restore a new Invite route at `0/5` with no stale rendered journey. Reset creates a fresh demo storage epoch, including a newly generated local code; that code is then used consistently by Generate, Share, and the deferred fixture. The reduced-motion path was verified with `prefers-reduced-motion: reduce`; content remains immediately visible and navigation animation is disabled.
 
 ## Known limitations and proof boundary
 
@@ -427,7 +438,7 @@ The rendered reviewer build was also checked at 375 x 812, 812 x 375, and 1440 x
 - **No provider credentials are committed.** A reviewer can run the web flow immediately. Branch URL serving and Firebase delivery require their own configured projects.
 - **The backend is local.** The mock produces a random 40-bit human-readable code and preserves it per fixture member, but it does not enforce global uniqueness. Expiry, campaign status, recipient eligibility, self-referral prevention, fraud controls, account authority, and rewards require a server.
 - **Authentication is a fixture.** The referrer identity is fixed and recipient onboarding assumes an unauthenticated user. A production app must gate routing on real auth hydration and reject already-authenticated/ineligible recipients server-side.
-- **Reset retains member identity.** Reset clears pending/frozen attribution, callback and analytics receipts, outbox items, mock signup receipts, buffered routing, and visible telemetry. It deliberately retains the authenticated member's generated code so `get-or-create` remains stable; the next journey uses whichever code generation returns and starts at `0/5`.
+- **Reset starts a new demo epoch.** Reset rotates every persisted demo namespace before asynchronous cleanup, including the generated code, pending/frozen attribution, callback and analytics receipts, outbox items, mock signup receipts, buffered routing, and visible telemetry. The next journey therefore generates a fresh code and starts at `0/5`.
 - **A share success is not a delivery receipt.** It means the platform accepted the share action. Android cannot reliably confirm that a recipient received it.
 - **A sideloaded APK is not store-mediated deferred proof.** Deterministic install-referrer validation requires a real Play/TestFlight path and configured provider dashboards.
 - **Deferred matching may be uncertain.** `+is_first_session` is routing context, not financial authorization. Production UX needs a confirmation/manual-code recovery path.

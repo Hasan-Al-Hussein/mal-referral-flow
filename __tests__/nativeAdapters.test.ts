@@ -142,7 +142,7 @@ describe('native Firebase adapter', () => {
       properties: {
         referral_code: 'MAL-ABCD2345',
         platform: 'android' as const,
-        event_id: 'evt_abc1234',
+        event_id: 'evt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         flow_id: 'referrer:MAL-ABCD2345',
         occurred_at_utc: '2026-07-31T12:00:00.000Z',
         schema_version: 1,

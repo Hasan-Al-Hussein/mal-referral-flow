@@ -3,9 +3,16 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
 const branchKey = process.env.EXPO_PUBLIC_BRANCH_KEY;
 const branchDomain = process.env.EXPO_PUBLIC_BRANCH_DOMAIN;
 const branchAlternateDomain = process.env.EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN;
-const googleServicesJson = process.env.GOOGLE_SERVICES_JSON;
-const googleServicesPlist = process.env.GOOGLE_SERVICES_PLIST;
 const nativeSdkBuild = process.env.NATIVE_SDK_BUILD === '1';
+const nativeBuildPlatform =
+  process.env.EAS_BUILD_PLATFORM ?? process.env.NATIVE_BUILD_PLATFORM ?? 'all';
+const easBuildWorker = process.env.EAS_BUILD === 'true';
+const googleServicesJson =
+  process.env.GOOGLE_SERVICES_JSON ??
+  (nativeSdkBuild && !easBuildWorker ? './google-services.json' : undefined);
+const googleServicesPlist =
+  process.env.GOOGLE_SERVICES_PLIST ??
+  (nativeSdkBuild && !easBuildWorker ? './GoogleService-Info.plist' : undefined);
 const webBaseUrl = process.env.EXPO_PUBLIC_BASE_URL;
 
 const branchDomains = [branchDomain, branchAlternateDomain].filter(
@@ -14,15 +21,28 @@ const branchDomains = [branchDomain, branchAlternateDomain].filter(
 
 export default ({ config }: ConfigContext) => {
   const plugins: NonNullable<ExpoConfig['plugins']> = ['expo-font'];
+  const buildsAndroid = nativeBuildPlatform === 'android' || nativeBuildPlatform === 'all';
+  const buildsIos = nativeBuildPlatform === 'ios' || nativeBuildPlatform === 'all';
+
+  if (nativeSdkBuild && !['android', 'ios', 'all'].includes(nativeBuildPlatform)) {
+    throw new Error(
+      'NATIVE_BUILD_PLATFORM/EAS_BUILD_PLATFORM must be android, ios, or all.',
+    );
+  }
 
   if (nativeSdkBuild && (!branchKey || !branchDomain)) {
     throw new Error(
       'NATIVE_SDK_BUILD=1 requires EXPO_PUBLIC_BRANCH_KEY and EXPO_PUBLIC_BRANCH_DOMAIN.',
     );
   }
-  if (nativeSdkBuild && (!googleServicesJson || !googleServicesPlist)) {
+  if (nativeSdkBuild && easBuildWorker && buildsAndroid && !googleServicesJson) {
     throw new Error(
-      'NATIVE_SDK_BUILD=1 requires GOOGLE_SERVICES_JSON and GOOGLE_SERVICES_PLIST.',
+      'Android native SDK builds require GOOGLE_SERVICES_JSON.',
+    );
+  }
+  if (nativeSdkBuild && easBuildWorker && buildsIos && !googleServicesPlist) {
+    throw new Error(
+      'iOS native SDK builds require GOOGLE_SERVICES_PLIST.',
     );
   }
 
@@ -37,7 +57,7 @@ export default ({ config }: ConfigContext) => {
     ]);
   }
 
-  if (nativeSdkBuild && googleServicesJson && googleServicesPlist) {
+  if (nativeSdkBuild) {
     plugins.push('@react-native-firebase/app');
     plugins.push('@react-native-firebase/analytics');
     plugins.push([
@@ -69,12 +89,13 @@ export default ({ config }: ConfigContext) => {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.hasanalhussein.malreferral',
-      googleServicesFile: nativeSdkBuild ? googleServicesPlist : undefined,
+      googleServicesFile: nativeSdkBuild && buildsIos ? googleServicesPlist : undefined,
       associatedDomains: branchDomains.map((domain) => `applinks:${domain}`),
     },
     android: {
       package: 'com.hasanalhussein.malreferral',
-      googleServicesFile: nativeSdkBuild ? googleServicesJson : undefined,
+      googleServicesFile:
+        nativeSdkBuild && buildsAndroid ? googleServicesJson : undefined,
       permissions: [
         'com.android.vending.INSTALL_REFERRER',
       ],
@@ -98,8 +119,18 @@ export default ({ config }: ConfigContext) => {
     },
     extra: {
       nativeSdkBuild,
+      nativeBuildPlatform,
+      easBuildWorker,
       branchConfigured: Boolean(branchKey && branchDomain),
-      firebaseConfigured: Boolean(googleServicesJson && googleServicesPlist),
+      firebaseConfigured: Boolean(
+        (!buildsAndroid || googleServicesJson) && (!buildsIos || googleServicesPlist),
+      ),
+      firebaseCredentialSource:
+        process.env.GOOGLE_SERVICES_JSON || process.env.GOOGLE_SERVICES_PLIST
+          ? 'environment-file-path'
+          : nativeSdkBuild
+            ? 'local-ignored-file-fallback'
+            : 'not-configured',
       eas: {
         projectId: process.env.EAS_PROJECT_ID,
       },

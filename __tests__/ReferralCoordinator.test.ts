@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { ReferralCoordinator } from '../src/application/ReferralCoordinator';
 import {
@@ -30,13 +30,19 @@ class MemoryStorage implements ReferralStorage {
   readonly operations: string[];
   readonly processedAttributions = new Set<string>();
   readonly milestones = new Set<string>();
+  readonly acceptedAnalyticsEvents: ReferralEventRecord[] = [];
   readonly pendingAnalyticsEvents = new Map<string, ReferralEventRecord>();
   readonly signupReceipts = new Map<string, ReferralAcceptanceReceipt>();
   getPendingError: Error | undefined;
   savePendingError: Error | undefined;
+  completeJourneyFailuresRemaining = 0;
+  savePendingGate: Promise<void> | undefined;
+  onSavePendingStart: (() => void) | undefined;
+  resetGate: Promise<void> | undefined;
   private readonly generatedCodes = new Map<string, string>();
   private pendingAttribution: ReferralAttribution | null = null;
-  private frozenReferralCode: string | null = null;
+  private frozenAttribution: ReferralAttribution | null = null;
+  private epoch = 0;
 
   constructor(operations: string[] = []) {
     this.operations = operations;
@@ -56,7 +62,11 @@ class MemoryStorage implements ReferralStorage {
   }
 
   async savePendingAttribution(attribution: ReferralAttribution): Promise<void> {
+    const epoch = this.epoch;
+    this.onSavePendingStart?.();
+    if (this.savePendingGate) await this.savePendingGate;
     if (this.savePendingError) throw this.savePendingError;
+    if (epoch !== this.epoch) return;
     this.operations.push('storage:save-pending');
     this.pendingAttribution = attribution;
   }
@@ -66,18 +76,26 @@ class MemoryStorage implements ReferralStorage {
     this.pendingAttribution = null;
   }
 
-  async getFrozenReferralCode(): Promise<string | null> {
-    return this.frozenReferralCode;
+  async getFrozenAttribution(): Promise<ReferralAttribution | null> {
+    return this.frozenAttribution;
   }
 
-  async freezeReferralCode(code: string): Promise<void> {
-    this.operations.push('storage:freeze-code');
-    this.frozenReferralCode = code;
+  async freezeAttribution(attribution: ReferralAttribution): Promise<void> {
+    this.operations.push('storage:freeze-attribution');
+    this.frozenAttribution = attribution;
   }
 
-  async clearFrozenReferralCode(): Promise<void> {
-    this.operations.push('storage:clear-frozen-code');
-    this.frozenReferralCode = null;
+  async completeReferralJourney(attribution: ReferralAttribution): Promise<void> {
+    this.operations.push('storage:complete-journey');
+    if (this.completeJourneyFailuresRemaining > 0) {
+      this.completeJourneyFailuresRemaining -= 1;
+      throw new Error('cleanup unavailable');
+    }
+    if (this.frozenAttribution?.fingerprint !== attribution.fingerprint) {
+      throw new Error('frozen attribution changed');
+    }
+    this.pendingAttribution = null;
+    this.frozenAttribution = null;
   }
 
   async hasProcessedAttribution(fingerprint: string): Promise<boolean> {
@@ -93,18 +111,30 @@ class MemoryStorage implements ReferralStorage {
     return this.milestones.has(key);
   }
 
-  async markMilestone(key: string): Promise<void> {
+  async markMilestone(key: string, event: ReferralEventRecord): Promise<void> {
     this.operations.push('storage:mark-milestone');
     this.milestones.add(key);
+    this.acceptedAnalyticsEvents.push(event);
+  }
+
+  async getAcceptedAnalyticsEvents(): Promise<ReferralEventRecord[]> {
+    return this.acceptedAnalyticsEvents;
   }
 
   async getPendingAnalyticsEvents(): Promise<ReferralEventRecord[]> {
     return [...this.pendingAnalyticsEvents.values()];
   }
 
-  async savePendingAnalyticsEvent(event: ReferralEventRecord): Promise<void> {
+  async reservePendingAnalyticsEvent(event: ReferralEventRecord): Promise<ReferralEventRecord> {
+    const existing = [...this.pendingAnalyticsEvents.values()].find(
+      (candidate) =>
+        candidate.name === event.name &&
+        candidate.properties.flow_id === event.properties.flow_id,
+    );
+    if (existing) return existing;
     this.operations.push('storage:save-analytics');
     this.pendingAnalyticsEvents.set(event.properties.event_id, event);
+    return event;
   }
 
   async removePendingAnalyticsEvent(eventId: string): Promise<void> {
@@ -116,20 +146,27 @@ class MemoryStorage implements ReferralStorage {
     return this.signupReceipts.get(idempotencyKey) ?? null;
   }
 
-  async saveSignupReceipt(
+  async createSignupReceipt(
     idempotencyKey: string,
     receipt: ReferralAcceptanceReceipt,
-  ): Promise<void> {
+  ): Promise<ReferralAcceptanceReceipt> {
+    const existing = this.signupReceipts.get(idempotencyKey);
+    if (existing) return existing;
     this.signupReceipts.set(idempotencyKey, receipt);
+    return receipt;
   }
 
   async resetDemoState(): Promise<void> {
+    this.epoch += 1;
+    this.generatedCodes.clear();
     this.pendingAttribution = null;
-    this.frozenReferralCode = null;
+    this.frozenAttribution = null;
     this.processedAttributions.clear();
     this.milestones.clear();
+    this.acceptedAnalyticsEvents.length = 0;
     this.pendingAnalyticsEvents.clear();
     this.signupReceipts.clear();
+    if (this.resetGate) await this.resetGate;
   }
 }
 
@@ -137,12 +174,14 @@ class MemoryAnalyticsClient implements AnalyticsClient {
   readonly attempts: ReferralEventRecord[] = [];
   readonly events: ReferralEventRecord[] = [];
   readonly failingEvents = new Set<ReferralEventName>();
+  gate: Promise<void> | undefined;
 
   constructor(private readonly operations: string[]) {}
 
   async logEvent(event: ReferralEventRecord): Promise<void> {
     this.operations.push(`analytics:${event.name}`);
     this.attempts.push(event);
+    if (this.gate) await this.gate;
     if (this.failingEvents.has(event.name)) throw new Error('Analytics unavailable');
     this.events.push(event);
   }
@@ -185,8 +224,16 @@ class FakeReferralApi implements MockReferralApi {
   readonly acceptedReferrals: { code: string; email: string; idempotencyKey: string }[] = [];
   generatedCode = CODE_A;
   acceptError: Error | undefined;
+  generationGate: Promise<void> | undefined;
+  acceptanceGate: Promise<void> | undefined;
+  private lifecycle = 0;
+
+  constructor(private readonly storage: MemoryStorage) {}
 
   async getOrCreateCode(): Promise<string> {
+    const lifecycle = this.lifecycle;
+    if (this.generationGate) await this.generationGate;
+    if (lifecycle !== this.lifecycle) throw new Error('generation cancelled');
     return this.generatedCode;
   }
 
@@ -195,17 +242,30 @@ class FakeReferralApi implements MockReferralApi {
     email: string,
     idempotencyKey: string,
   ): Promise<{ accountId: string }> {
+    const lifecycle = this.lifecycle;
     this.acceptedReferrals.push({ code, email, idempotencyKey });
+    if (this.acceptanceGate) await this.acceptanceGate;
+    if (lifecycle !== this.lifecycle) throw new Error('acceptance cancelled');
     if (this.acceptError) throw this.acceptError;
-    return { accountId: 'acct_test_123' };
+    const receipt = await this.storage.createSignupReceipt(idempotencyKey, {
+      accountId: 'acct_test123',
+      referralCode: code,
+    });
+    return { accountId: receipt.accountId };
+  }
+
+  resetLifecycle(): void {
+    this.lifecycle += 1;
   }
 }
 
 class FakeShareService implements ShareService {
   result: ShareResult = { status: 'shared', channel: 'native-share' };
   thrownError: Error | undefined;
+  gate: Promise<void> | undefined;
 
   async shareReferral(): Promise<ShareResult> {
+    if (this.gate) await this.gate;
     if (this.thrownError) throw this.thrownError;
     return this.result;
   }
@@ -221,13 +281,24 @@ interface Harness {
   operations: string[];
 }
 
-function createHarness(): Harness {
+function createHarness(timeoutMs = 10_000): Harness {
   const operations: string[] = [];
   const storage = new MemoryStorage(operations);
   const analyticsClient = new MemoryAnalyticsClient(operations);
-  const analytics = new AnalyticsTracker(analyticsClient, storage, 'android', () => FIXED_NOW);
+  let eventSequence = 0;
+  const analytics = new AnalyticsTracker(
+    analyticsClient,
+    storage,
+    'android',
+    () => FIXED_NOW,
+    () => {
+      eventSequence += 1;
+      return eventSequence.toString(16).padStart(32, '0');
+    },
+    timeoutMs,
+  );
   const deepLinks = new FakeDeepLinkService();
-  const referralApi = new FakeReferralApi();
+  const referralApi = new FakeReferralApi(storage);
   const shareService = new FakeShareService();
   const coordinator = new ReferralCoordinator(
     deepLinks,
@@ -236,6 +307,7 @@ function createHarness(): Harness {
     referralApi,
     shareService,
     'android',
+    timeoutMs,
   );
   return {
     coordinator,
@@ -274,6 +346,18 @@ function eventsNamed(client: MemoryAnalyticsClient, name: ReferralEventName): Re
 async function settleAsyncWork(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 0));
 }
+
+function deferred(): { promise: Promise<void>; resolve(): void } {
+  let resolve: (() => void) | undefined;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve: () => resolve?.() };
+}
+
+afterEach(() => {
+  jest.useRealTimers();
+});
 
 describe('ReferralCoordinator', () => {
   it.each([
@@ -448,7 +532,7 @@ describe('ReferralCoordinator', () => {
         schema_version: 1,
         app_version: '1.0.0',
       });
-      expect(event.properties.event_id).toMatch(/^evt_[a-z0-9]{7}$/);
+      expect(event.properties.event_id).toMatch(/^evt_[a-f0-9]{32}$/);
       expect(event.properties.flow_id).toBeTruthy();
     }
     expect(eventsNamed(analyticsClient, 'referral_link_shared')[0]?.properties.share_channel).toBe(
@@ -461,9 +545,9 @@ describe('ReferralCoordinator', () => {
         idempotencyKey: `signup:${attribution.fingerprint}`,
       },
     ]);
-    expect(result).toEqual({ accountId: 'acct_test_123', referralCode: CODE_A });
+    expect(result).toEqual({ accountId: 'acct_test123', referralCode: CODE_A });
     await expect(storage.getPendingAttribution()).resolves.toBeNull();
-    await expect(storage.getFrozenReferralCode()).resolves.toBeNull();
+    await expect(storage.getFrozenAttribution()).resolves.toBeNull();
   });
 
   it('records deliberate repeat shares as distinct user attempts', async () => {
@@ -518,6 +602,8 @@ describe('ReferralCoordinator', () => {
     const navigated: ReferralAttribution[] = [];
     coordinator.setNavigator((nextAttribution) => navigated.push(nextAttribution));
 
+    await coordinator.handleDeepLink(validBranchEvent(false, CODE_A));
+    navigated.length = 0;
     await expect(coordinator.beginSignup(CODE_A, attribution)).resolves.toBe(CODE_A);
     await coordinator.handleDeepLink(validBranchEvent(false, CODE_B));
     const result = await coordinator.completeSignup(CODE_B, 'new.user@example.com', attribution);
@@ -547,7 +633,10 @@ describe('ReferralCoordinator', () => {
     ).rejects.toThrow('Referral endpoint unavailable');
 
     await expect(storage.getPendingAttribution()).resolves.toMatchObject({ referralCode: CODE_A });
-    await expect(storage.getFrozenReferralCode()).resolves.toBe(CODE_A);
+    await expect(storage.getFrozenAttribution()).resolves.toMatchObject({
+      referralCode: CODE_A,
+      fingerprint: attribution.fingerprint,
+    });
     expect(eventsNamed(analyticsClient, 'referral_signup_completed')).toHaveLength(0);
     expect(eventsNamed(analyticsClient, 'referral_signup_failed')[0]?.properties).toMatchObject({
       referral_code: CODE_A,
@@ -555,6 +644,44 @@ describe('ReferralCoordinator', () => {
       attribution_kind: 'direct',
       reason: 'referral_acceptance_failed',
     });
+  });
+
+  it('returns backend success when atomic cleanup fails and retries cleanup without a failure event', async () => {
+    const { coordinator, storage, analyticsClient } = createHarness();
+    const attribution = attributionFor();
+    await coordinator.handleDeepLink(validBranchEvent());
+    await coordinator.beginSignup(CODE_A, attribution);
+    storage.completeJourneyFailuresRemaining = 1;
+
+    await expect(
+      coordinator.completeSignup(CODE_A, 'accepted@example.com', attribution),
+    ).resolves.toEqual({ accountId: 'acct_test123', referralCode: CODE_A });
+    expect(eventsNamed(analyticsClient, 'referral_signup_completed')).toHaveLength(1);
+    expect(eventsNamed(analyticsClient, 'referral_signup_failed')).toHaveLength(0);
+    expect(eventsNamed(analyticsClient, 'referral_state_cleanup_failed')).toHaveLength(1);
+    await expect(storage.getPendingAttribution()).resolves.toBeTruthy();
+    await expect(storage.getFrozenAttribution()).resolves.toBeTruthy();
+
+    coordinator.start();
+    await settleAsyncWork();
+    await expect(storage.getPendingAttribution()).resolves.toBeNull();
+    await expect(storage.getFrozenAttribution()).resolves.toBeNull();
+  });
+
+  it('rejects same-code attribution substitution with a different fingerprint', async () => {
+    const { coordinator, referralApi, analyticsClient } = createHarness();
+    const original = attributionFor();
+    await coordinator.handleDeepLink(validBranchEvent());
+    await coordinator.beginSignup(CODE_A, original);
+    const substituted = { ...original, fingerprint: 'other01' };
+
+    await expect(
+      coordinator.completeSignup(CODE_A, 'new@example.com', substituted),
+    ).rejects.toThrow('persisted referral attribution');
+    expect(referralApi.acceptedReferrals).toHaveLength(0);
+    expect(eventsNamed(analyticsClient, 'referral_signup_failed')[0]?.properties.reason).toBe(
+      'frozen_code_mismatch',
+    );
   });
 
   it('keeps a pending referral retryable when click analytics delivery fails', async () => {
@@ -591,11 +718,12 @@ describe('ReferralCoordinator', () => {
   it('suppresses a new same-code callback after signup has already frozen attribution', async () => {
     const { coordinator, analyticsClient } = createHarness();
     const attribution = attributionFor();
+    await coordinator.handleDeepLink(validBranchEvent());
     await coordinator.beginSignup(CODE_A, attribution);
 
     await coordinator.handleDeepLink(validBranchEvent());
 
-    expect(eventsNamed(analyticsClient, 'referral_link_clicked')).toHaveLength(0);
+    expect(eventsNamed(analyticsClient, 'referral_link_clicked')).toHaveLength(1);
     expect(eventsNamed(analyticsClient, 'referral_duplicate_suppressed')[0]?.properties.reason).toBe(
       'signup_already_started',
     );
@@ -603,9 +731,11 @@ describe('ReferralCoordinator', () => {
 
   it('rejects starting another attribution when a different code is already frozen', async () => {
     const { coordinator, storage, analyticsClient } = createHarness();
-    await storage.freezeReferralCode(CODE_B);
+    const attributionA = attributionFor(CODE_A);
+    await storage.savePendingAttribution(attributionA);
+    await storage.freezeAttribution(attributionFor(CODE_B));
 
-    await expect(coordinator.beginSignup(CODE_A, attributionFor(CODE_A))).rejects.toThrow(
+    await expect(coordinator.beginSignup(CODE_A, attributionA)).rejects.toThrow(
       'Another referral is already attached',
     );
     expect(eventsNamed(analyticsClient, 'referral_signup_started')).toHaveLength(0);
@@ -693,6 +823,103 @@ describe('ReferralCoordinator', () => {
     expect(navigated).toHaveLength(0);
   });
 
+  it('makes reset a barrier against a delayed pending-attribution write and route', async () => {
+    const { coordinator, storage, analyticsClient } = createHarness();
+    const writeStarted = deferred();
+    const releaseWrite = deferred();
+    storage.onSavePendingStart = writeStarted.resolve;
+    storage.savePendingGate = releaseWrite.promise;
+    const navigated: ReferralAttribution[] = [];
+    coordinator.setNavigator((attribution) => navigated.push(attribution));
+
+    const oldOperation = coordinator.handleDeepLink(validBranchEvent());
+    const oldOutcome = oldOperation.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await writeStarted.promise;
+    await coordinator.resetDemoState();
+    releaseWrite.resolve();
+
+    await expect(oldOutcome).resolves.toBeInstanceOf(Error);
+    await expect(storage.getPendingAttribution()).resolves.toBeNull();
+    expect(eventsNamed(analyticsClient, 'referral_link_clicked')).toHaveLength(0);
+    expect(navigated).toHaveLength(0);
+
+    storage.savePendingGate = undefined;
+    await coordinator.handleDeepLink(validBranchEvent(false, CODE_B));
+    expect(navigated.at(-1)?.referralCode).toBe(CODE_B);
+  });
+
+  it('cancels delayed generation and sharing without recreating post-reset telemetry', async () => {
+    const { coordinator, referralApi, shareService, analyticsClient } = createHarness();
+    const generationGate = deferred();
+    const shareGate = deferred();
+    referralApi.generationGate = generationGate.promise;
+    shareService.gate = shareGate.promise;
+    const oldGeneration = coordinator.generateReferral('member-before-reset');
+    const oldShare = coordinator.shareReferral({
+      referralCode: CODE_A,
+      url: 'https://mal.test-app.link/r/MAL-ABCD2345',
+    });
+    const generationOutcome = oldGeneration.catch((error: unknown) => error);
+    const shareOutcome = oldShare.catch((error: unknown) => error);
+    await Promise.resolve();
+
+    await coordinator.resetDemoState();
+    generationGate.resolve();
+    shareGate.resolve();
+
+    await expect(generationOutcome).resolves.toBeInstanceOf(Error);
+    await expect(shareOutcome).resolves.toBeInstanceOf(Error);
+    expect(eventsNamed(analyticsClient, 'referral_link_generated')).toHaveLength(0);
+    expect(eventsNamed(analyticsClient, 'referral_link_shared')).toHaveLength(0);
+
+    referralApi.generationGate = undefined;
+    shareService.gate = undefined;
+    referralApi.generatedCode = CODE_B;
+    const fresh = await coordinator.generateReferral('member-after-reset');
+    await coordinator.shareReferral(fresh);
+    expect(fresh.referralCode).toBe(CODE_B);
+    expect(eventsNamed(analyticsClient, 'referral_link_generated')).toHaveLength(1);
+    expect(eventsNamed(analyticsClient, 'referral_link_shared')).toHaveLength(1);
+  });
+
+  it('cancels delayed backend acceptance without a receipt or late failure telemetry', async () => {
+    const { coordinator, referralApi, storage, analyticsClient } = createHarness();
+    const attribution = attributionFor();
+    await coordinator.handleDeepLink(validBranchEvent());
+    await coordinator.beginSignup(CODE_A, attribution);
+    const acceptanceGate = deferred();
+    referralApi.acceptanceGate = acceptanceGate.promise;
+    const completion = coordinator.completeSignup(CODE_A, 'new@example.com', attribution);
+    const outcome = completion.catch((error: unknown) => error);
+    await settleAsyncWork();
+
+    await coordinator.resetDemoState();
+    acceptanceGate.resolve();
+
+    await expect(outcome).resolves.toBeInstanceOf(Error);
+    expect(storage.signupReceipts.size).toBe(0);
+    expect(eventsNamed(analyticsClient, 'referral_signup_completed')).toHaveLength(0);
+    expect(eventsNamed(analyticsClient, 'referral_signup_failed')).toHaveLength(0);
+  });
+
+  it('recovers from a never-settling reset dependency within the configured timeout', async () => {
+    jest.useFakeTimers();
+    const { coordinator, storage } = createHarness(50);
+    storage.resetGate = new Promise<void>(() => undefined);
+
+    const reset = coordinator.resetDemoState();
+    await jest.advanceTimersByTimeAsync(50);
+    await expect(reset).resolves.toBeUndefined();
+
+    await expect(coordinator.handleDeepLink(validBranchEvent())).resolves.toBeUndefined();
+    await expect(storage.getPendingAttribution()).resolves.toMatchObject({
+      referralCode: CODE_A,
+    });
+  });
+
   it('coalesces concurrent completion into one backend acceptance', async () => {
     const { coordinator, referralApi } = createHarness();
     const attribution = attributionFor();
@@ -761,7 +988,7 @@ describe('ReferralCoordinator', () => {
     await expect(coordinator.beginSignup(CODE_B, attribution)).rejects.toThrow(
       'does not match',
     );
-    await expect(storage.getFrozenReferralCode()).resolves.toBeNull();
+    await expect(storage.getFrozenAttribution()).resolves.toBeNull();
     expect(eventsNamed(analyticsClient, 'referral_signup_started')).toHaveLength(0);
     expect(eventsNamed(analyticsClient, 'referral_code_rejected')).toHaveLength(1);
   });

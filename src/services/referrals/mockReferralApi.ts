@@ -1,6 +1,14 @@
 import * as Crypto from 'expo-crypto';
 
-import { isValidReferralCode, stableHash } from '../../domain/referral';
+import {
+  isValidReferralCode,
+  normalizeReferralCode,
+  stableHash,
+} from '../../domain/referral';
+import {
+  DEFAULT_OPERATION_TIMEOUT_MS,
+  withTimeout,
+} from '../operationTimeout';
 
 import type { ReferralStorage } from '../storage/referralStorage';
 
@@ -15,11 +23,19 @@ export interface MockReferralApi {
     email: string,
     idempotencyKey: string,
   ): Promise<{ accountId: string }>;
+  resetLifecycle?(): void;
 }
 
 interface MockReferralApiOptions {
   delay?: (milliseconds: number) => Promise<void>;
   randomBytes?: (length: number) => Promise<Uint8Array>;
+  timeoutMs?: number;
+}
+
+class MockApiLifecycleCancelledError extends Error {
+  constructor() {
+    super('Mock referral API operation was cancelled by reset.');
+  }
 }
 
 function defaultDelay(milliseconds: number): Promise<void> {
@@ -39,14 +55,37 @@ export function createMockReferralApi(
 ): MockReferralApi {
   const wait = options.delay ?? defaultDelay;
   const randomBytes = options.randomBytes ?? Crypto.getRandomBytesAsync;
+  const timeoutMs = options.timeoutMs ?? DEFAULT_OPERATION_TIMEOUT_MS;
+  let lifecycle = 0;
   const pendingCodeRequests = new Map<string, Promise<string>>();
   const pendingAcceptances = new Map<
     string,
     { referralCode: string; promise: Promise<{ accountId: string }> }
   >();
 
+  function isCurrent(capturedLifecycle: number): boolean {
+    return capturedLifecycle === lifecycle;
+  }
+
+  async function boundary<T>(
+    operation: Promise<T>,
+    capturedLifecycle: number,
+    operationName: string,
+  ): Promise<T> {
+    const result = await withTimeout(operation, operationName, timeoutMs);
+    if (!isCurrent(capturedLifecycle)) throw new MockApiLifecycleCancelledError();
+    return result;
+  }
+
   return {
+    resetLifecycle() {
+      lifecycle += 1;
+      pendingCodeRequests.clear();
+      pendingAcceptances.clear();
+    },
+
     getOrCreateCode(userId) {
+      const capturedLifecycle = lifecycle;
       const normalizedUserId = userId.trim();
       if (!normalizedUserId || normalizedUserId.length > MAX_USER_ID_LENGTH) {
         return Promise.reject(new Error('Authenticated member identity is required.'));
@@ -56,14 +95,26 @@ export function createMockReferralApi(
       if (existingRequest) return existingRequest;
 
       const request = (async () => {
-        await wait(420);
-        const existing = await storage.getGeneratedCode(normalizedUserId);
-        if (isValidReferralCode(existing)) return existing.trim().toUpperCase();
+        await boundary(wait(420), capturedLifecycle, 'mock referral generation delay');
+        const existing = await boundary(
+          storage.getGeneratedCode(normalizedUserId),
+          capturedLifecycle,
+          'generated referral code read',
+        );
+        if (isValidReferralCode(existing)) return normalizeReferralCode(existing);
 
-        const bytes = await randomBytes(8);
+        const bytes = await boundary(
+          randomBytes(8),
+          capturedLifecycle,
+          'referral code entropy',
+        );
         const code = encodeCode(bytes);
         if (!isValidReferralCode(code)) throw new Error('Referral code generation failed.');
-        await storage.setGeneratedCode(normalizedUserId, code);
+        await boundary(
+          storage.setGeneratedCode(normalizedUserId, code),
+          capturedLifecycle,
+          'generated referral code write',
+        );
         return code;
       })();
       pendingCodeRequests.set(normalizedUserId, request);
@@ -77,7 +128,9 @@ export function createMockReferralApi(
     },
 
     async acceptReferral(code, email, idempotencyKey) {
-      if (!isValidReferralCode(code)) throw new Error('Referral code is invalid.');
+      const capturedLifecycle = lifecycle;
+      const normalizedCode = normalizeReferralCode(code);
+      if (!isValidReferralCode(normalizedCode)) throw new Error('Referral code is invalid.');
       if (
         !idempotencyKey ||
         idempotencyKey.length > MAX_IDEMPOTENCY_KEY_LENGTH
@@ -85,9 +138,13 @@ export function createMockReferralApi(
         throw new Error('Signup idempotency key is invalid.');
       }
 
-      const receipt = await storage.getSignupReceipt(idempotencyKey);
+      const receipt = await boundary(
+        storage.getSignupReceipt(idempotencyKey),
+        capturedLifecycle,
+        'signup receipt read',
+      );
       if (receipt) {
-        if (receipt.referralCode !== code) {
+        if (receipt.referralCode !== normalizedCode) {
           throw new Error('Signup idempotency key conflicts with another referral.');
         }
         return { accountId: receipt.accountId };
@@ -95,34 +152,42 @@ export function createMockReferralApi(
 
       const pending = pendingAcceptances.get(idempotencyKey);
       if (pending) {
-        if (pending.referralCode !== code) {
+        if (pending.referralCode !== normalizedCode) {
           throw new Error('Signup idempotency key conflicts with another referral.');
         }
         return pending.promise;
       }
 
       const promise = (async () => {
-        await wait(700);
+        await boundary(wait(700), capturedLifecycle, 'mock referral acceptance delay');
         if (email.toLowerCase().includes('+fail')) {
           throw new Error('The demo endpoint rejected this signup.');
         }
 
-        const repeatedReceipt = await storage.getSignupReceipt(idempotencyKey);
+        const repeatedReceipt = await boundary(
+          storage.getSignupReceipt(idempotencyKey),
+          capturedLifecycle,
+          'signup receipt retry read',
+        );
         if (repeatedReceipt) {
-          if (repeatedReceipt.referralCode !== code) {
+          if (repeatedReceipt.referralCode !== normalizedCode) {
             throw new Error('Signup idempotency key conflicts with another referral.');
           }
           return { accountId: repeatedReceipt.accountId };
         }
 
-        const accountId = `acct_${stableHash(`signup:${idempotencyKey}:${code}`)}`;
-        await storage.saveSignupReceipt(idempotencyKey, {
-          accountId,
-          referralCode: code.trim().toUpperCase(),
-        });
-        return { accountId };
+        const accountId = `acct_${stableHash(`signup:${idempotencyKey}:${normalizedCode}`)}`;
+        const persistedReceipt = await boundary(
+          storage.createSignupReceipt(idempotencyKey, {
+            accountId,
+            referralCode: normalizedCode,
+          }),
+          capturedLifecycle,
+          'atomic signup receipt creation',
+        );
+        return { accountId: persistedReceipt.accountId };
       })();
-      pendingAcceptances.set(idempotencyKey, { referralCode: code, promise });
+      pendingAcceptances.set(idempotencyKey, { referralCode: normalizedCode, promise });
       const clearAcceptance = () => {
         if (pendingAcceptances.get(idempotencyKey)?.promise === promise) {
           pendingAcceptances.delete(idempotencyKey);

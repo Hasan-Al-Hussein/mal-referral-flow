@@ -28,6 +28,7 @@ const shortLabels: Record<ReferralEventName, string> = {
   referral_deeplink_resolution_failed: 'Link rejected',
   referral_code_rejected: 'Code rejected',
   referral_signup_failed: 'Signup failed',
+  referral_state_cleanup_failed: 'Accepted state cleanup pending',
   referral_duplicate_suppressed: 'Duplicate suppressed',
 };
 

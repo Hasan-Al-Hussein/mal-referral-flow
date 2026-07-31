@@ -67,9 +67,26 @@ export function ReferralRuntimeProvider({ children }: PropsWithChildren): React.
       sequence += 1;
       setEvents((current) => [{ event, delivery, sequence }, ...current].slice(0, 30));
     });
+    const unsubscribeJourney = runtime.coordinator.subscribeToJourney((attribution) => {
+      void runtime.tracker.getAcceptedJourneySnapshot(attribution).then((snapshot) => {
+        setEvents((current) => {
+          const knownEventIds = new Set(
+            current.map(({ event }) => event.properties.event_id),
+          );
+          const hydrated = snapshot
+            .filter(({ properties }) => !knownEventIds.has(properties.event_id))
+            .map((event) => {
+              sequence += 1;
+              return { event, delivery: 'accepted' as const, sequence };
+            });
+          return [...hydrated.reverse(), ...current].slice(0, 30);
+        });
+      });
+    });
     runtime.coordinator.start();
     return () => {
       unsubscribe();
+      unsubscribeJourney();
       runtime.coordinator.stop();
     };
   }, [runtime]);

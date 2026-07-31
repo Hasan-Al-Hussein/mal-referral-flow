@@ -25,6 +25,7 @@ export const FAILURE_REFERRAL_EVENTS = [
   'referral_deeplink_resolution_failed',
   'referral_code_rejected',
   'referral_signup_failed',
+  'referral_state_cleanup_failed',
   'referral_duplicate_suppressed',
 ] as const;
 
@@ -47,6 +48,7 @@ export const REFERRAL_DIAGNOSTIC_REASONS = [
   'frozen_code_mismatch',
   'signup_not_started',
   'referral_acceptance_failed',
+  'accepted_cleanup_failed',
   'callback_processing_failed',
   'subscription_failed',
   'pending_restore_failed',
@@ -91,7 +93,7 @@ const platformNames = new Set<string>(['android', 'ios', 'web', 'windows', 'maco
 const attributionKinds = new Set<string>(['direct', 'deferred', 'demo-direct', 'demo-deferred']);
 const diagnosticReasons = new Set<string>(REFERRAL_DIAGNOSTIC_REASONS);
 const shareChannels = new Set<string>(['native-share', 'web-share', 'clipboard']);
-const eventIdPattern = /^evt_[a-z0-9]{7}$/;
+const eventIdPattern = /^evt_[a-f0-9]{32}$/;
 const flowIdPattern = /^[a-z0-9:_-]+$/i;
 const eventKeys = new Set(['name', 'properties']);
 const propertyKeys = new Set([

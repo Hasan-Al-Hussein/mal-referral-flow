@@ -1,4 +1,4 @@
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 
 import { createMockReferralApi } from '../src/services/referrals/mockReferralApi';
 
@@ -15,6 +15,7 @@ class ApiStorage implements ReferralStorage {
   readonly generatedCodes = new Map<string, string>();
   readonly receipts = new Map<string, ReferralAcceptanceReceipt>();
   receiptWrites = 0;
+  private receiptQueue: Promise<void> = Promise.resolve();
 
   async getGeneratedCode(userId: string): Promise<string | null> {
     return this.generatedCodes.get(userId) ?? null;
@@ -25,12 +26,27 @@ class ApiStorage implements ReferralStorage {
   async getSignupReceipt(idempotencyKey: string): Promise<ReferralAcceptanceReceipt | null> {
     return this.receipts.get(idempotencyKey) ?? null;
   }
-  async saveSignupReceipt(
+  createSignupReceipt(
     idempotencyKey: string,
     receipt: ReferralAcceptanceReceipt,
-  ): Promise<void> {
-    this.receiptWrites += 1;
-    this.receipts.set(idempotencyKey, receipt);
+  ): Promise<ReferralAcceptanceReceipt> {
+    const operation = this.receiptQueue.then(() => {
+      const existing = this.receipts.get(idempotencyKey);
+      if (existing) {
+        if (existing.referralCode !== receipt.referralCode) {
+          throw new Error('Signup idempotency key conflicts with another referral.');
+        }
+        return existing;
+      }
+      this.receiptWrites += 1;
+      this.receipts.set(idempotencyKey, receipt);
+      return receipt;
+    });
+    this.receiptQueue = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
   }
 
   async getPendingAttribution(): Promise<ReferralAttribution | null> {
@@ -38,11 +54,11 @@ class ApiStorage implements ReferralStorage {
   }
   async savePendingAttribution(_attribution: ReferralAttribution): Promise<void> {}
   async clearPendingAttribution(): Promise<void> {}
-  async getFrozenReferralCode(): Promise<string | null> {
+  async getFrozenAttribution(): Promise<ReferralAttribution | null> {
     return null;
   }
-  async freezeReferralCode(_code: string): Promise<void> {}
-  async clearFrozenReferralCode(): Promise<void> {}
+  async freezeAttribution(_attribution: ReferralAttribution): Promise<void> {}
+  async completeReferralJourney(_attribution: ReferralAttribution): Promise<void> {}
   async hasProcessedAttribution(_fingerprint: string): Promise<boolean> {
     return false;
   }
@@ -51,20 +67,37 @@ class ApiStorage implements ReferralStorage {
     return false;
   }
   async markMilestone(_key: string): Promise<void> {}
+  async getAcceptedAnalyticsEvents(): Promise<ReferralEventRecord[]> {
+    return [];
+  }
   async getPendingAnalyticsEvents(): Promise<ReferralEventRecord[]> {
     return [];
   }
-  async savePendingAnalyticsEvent(_event: ReferralEventRecord): Promise<void> {}
+  async reservePendingAnalyticsEvent(
+    event: ReferralEventRecord,
+  ): Promise<ReferralEventRecord> {
+    return event;
+  }
   async removePendingAnalyticsEvent(_eventId: string): Promise<void> {}
   async resetDemoState(): Promise<void> {}
 }
 
-function createApi(storage: ApiStorage, randomBytes = async () => new Uint8Array(8)) {
+function createApi(
+  storage: ApiStorage,
+  randomBytes = async () => new Uint8Array(8),
+  delay: (milliseconds: number) => Promise<void> = async () => undefined,
+  timeoutMs = 10_000,
+) {
   return createMockReferralApi(storage, {
-    delay: async () => undefined,
+    delay,
     randomBytes,
+    timeoutMs,
   });
 }
+
+afterEach(() => {
+  jest.useRealTimers();
+});
 
 describe('mock referral API', () => {
   it('coalesces concurrent generation and returns a stable valid member code', async () => {
@@ -120,6 +153,44 @@ describe('mock referral API', () => {
     ).rejects.toThrow('conflicts with another referral');
   });
 
+  it('canonicalizes case and whitespace before idempotency comparison and hashing', async () => {
+    const storage = new ApiStorage();
+    const api = createApi(storage);
+    const key = 'signup:canonical';
+
+    const first = await api.acceptReferral(' mal-abcd2345 ', 'new@example.com', key);
+    await expect(
+      api.acceptReferral('MAL-ABCD2345', 'changed@example.com', key),
+    ).resolves.toEqual(first);
+    expect(storage.receipts.get(key)).toMatchObject({ referralCode: 'MAL-ABCD2345' });
+    expect(storage.receiptWrites).toBe(1);
+  });
+
+  it('atomically creates one receipt across two API instances and rejects conflicts', async () => {
+    const storage = new ApiStorage();
+    const firstApi = createApi(storage);
+    const secondApi = createApi(storage);
+    const key = 'signup:shared-storage';
+
+    const [first, second] = await Promise.all([
+      firstApi.acceptReferral(' mal-abcd2345 ', 'first@example.com', key),
+      secondApi.acceptReferral('MAL-ABCD2345', 'second@example.com', key),
+    ]);
+    expect(second).toEqual(first);
+    expect(storage.receiptWrites).toBe(1);
+
+    const conflictStorage = new ApiStorage();
+    const conflictA = createApi(conflictStorage);
+    const conflictB = createApi(conflictStorage);
+    const outcomes = await Promise.allSettled([
+      conflictA.acceptReferral('MAL-ABCD2345', 'first@example.com', key),
+      conflictB.acceptReferral(CODE_B, 'second@example.com', key),
+    ]);
+    expect(outcomes.filter(({ status }) => status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter(({ status }) => status === 'rejected')).toHaveLength(1);
+    expect(conflictStorage.receiptWrites).toBe(1);
+  });
+
   it('keeps a rejected acceptance retryable and creates no receipt', async () => {
     const storage = new ApiStorage();
     const api = createApi(storage);
@@ -144,6 +215,45 @@ describe('mock referral API', () => {
     await expect(
       api.acceptReferral('MAL-ABCD2345', 'new@example.com', ''),
     ).rejects.toThrow('idempotency key is invalid');
+    expect(storage.receipts.size).toBe(0);
+  });
+
+  it('bounds a never-settling dependency and remains usable after lifecycle reset', async () => {
+    jest.useFakeTimers();
+    const storage = new ApiStorage();
+    const never = () => new Promise<void>(() => undefined);
+    const api = createApi(storage, async () => new Uint8Array(8), never, 50);
+
+    const hung = api.acceptReferral('MAL-ABCD2345', 'new@example.com', 'signup:hung');
+    const timedOut = expect(hung).rejects.toThrow('timed out');
+    await jest.advanceTimersByTimeAsync(50);
+    await timedOut;
+    expect(storage.receipts.size).toBe(0);
+
+    api.resetLifecycle?.();
+    const recovered = createApi(storage);
+    await expect(
+      recovered.acceptReferral('MAL-ABCD2345', 'new@example.com', 'signup:recovered'),
+    ).resolves.toMatchObject({ accountId: expect.stringMatching(/^acct_[a-z0-9]{7}$/) });
+  });
+
+  it('does not create a receipt when delayed acceptance completes after reset', async () => {
+    const storage = new ApiStorage();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const api = createApi(storage, async () => new Uint8Array(8), () => gate);
+
+    const acceptance = api.acceptReferral(
+      'MAL-ABCD2345',
+      'new@example.com',
+      'signup:cancelled',
+    );
+    api.resetLifecycle?.();
+    release?.();
+
+    await expect(acceptance).rejects.toThrow('cancelled');
     expect(storage.receipts.size).toBe(0);
   });
 });

@@ -1,9 +1,14 @@
+import * as Crypto from 'expo-crypto';
+
 import {
   ANALYTICS_SCHEMA_VERSION,
   APP_VERSION,
   isReferralEventRecord,
 } from '../../domain/analytics';
-import { stableHash } from '../../domain/referral';
+import {
+  DEFAULT_OPERATION_TIMEOUT_MS,
+  withTimeout,
+} from '../operationTimeout';
 
 import type {
   AnalyticsClient,
@@ -13,6 +18,7 @@ import type {
   ReferralEventProperties,
   ReferralEventRecord,
 } from '../../domain/analytics';
+import type { ReferralAttribution } from '../../domain/referral';
 import type { ReferralStorage } from '../storage/referralStorage';
 
 export type AnalyticsDelivery = 'accepted' | 'duplicate' | 'failed';
@@ -33,21 +39,30 @@ export interface AnalyticsFlushResult {
   failed: number;
 }
 
+class AnalyticsLifecycleCancelledError extends Error {}
+
 export class AnalyticsTracker {
   private readonly listeners = new Set<AnalyticsListener>();
   private readonly inFlightMilestones = new Map<string, Promise<AnalyticsDelivery>>();
-  private attemptSequence = 0;
+  private lifecycle = 0;
 
   constructor(
     private readonly client: AnalyticsClient,
     private readonly storage: ReferralStorage,
     private readonly platform: PlatformName,
     private readonly now: () => Date = () => new Date(),
+    private readonly createEventId: () => string = () => Crypto.randomUUID(),
+    private readonly timeoutMs = DEFAULT_OPERATION_TIMEOUT_MS,
   ) {}
 
   subscribe(listener: AnalyticsListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  resetLifecycle(): void {
+    this.lifecycle += 1;
+    this.inFlightMilestones.clear();
   }
 
   async track(
@@ -56,16 +71,13 @@ export class AnalyticsTracker {
     flowId: string,
     options: TrackOptions = {},
   ): Promise<AnalyticsDelivery> {
+    const lifecycle = this.lifecycle;
     const once = options.once ?? true;
     const milestoneKey = `${flowId}:${name}`;
-    this.attemptSequence += 1;
-    const eventIdentity = once
-      ? milestoneKey
-      : `${milestoneKey}:attempt:${this.attemptSequence}`;
     const properties: ReferralEventProperties = {
       referral_code: referralCode,
       platform: this.platform,
-      event_id: `evt_${stableHash(eventIdentity)}`,
+      event_id: this.nextEventId(),
       flow_id: flowId,
       occurred_at_utc: this.now().toISOString(),
       schema_version: ANALYTICS_SCHEMA_VERSION,
@@ -83,47 +95,84 @@ export class AnalyticsTracker {
     const event: ReferralEventRecord = { name, properties };
 
     if (!isReferralEventRecord(event)) {
-      this.emit(event, 'failed');
+      if (this.isCurrent(lifecycle)) this.emit(event, 'failed');
       return 'failed';
     }
 
-    if (!once) return this.deliverBestEffort(event);
-    return this.deliverOnce(event, milestoneKey, true);
+    if (!once) return this.deliverBestEffort(event, lifecycle);
+    return this.deliverOnce(event, milestoneKey, true, lifecycle);
   }
 
   async flushPending(): Promise<AnalyticsFlushResult> {
+    const lifecycle = this.lifecycle;
     const result: AnalyticsFlushResult = { accepted: 0, duplicate: 0, failed: 0 };
     let events: ReferralEventRecord[];
     try {
-      events = await this.storage.getPendingAnalyticsEvents();
+      events = await this.boundary(
+        this.storage.getPendingAnalyticsEvents(),
+        lifecycle,
+        'analytics outbox read',
+      );
     } catch {
-      result.failed += 1;
+      if (this.isCurrent(lifecycle)) result.failed += 1;
       return result;
     }
 
     for (const event of events) {
+      if (!this.isCurrent(lifecycle)) break;
       const milestoneKey = `${event.properties.flow_id}:${event.name}`;
-      const delivery = await this.deliverOnce(event, milestoneKey, false);
+      const delivery = await this.deliverOnce(event, milestoneKey, false, lifecycle);
+      if (!this.isCurrent(lifecycle)) break;
       result[delivery] += 1;
     }
     return result;
+  }
+
+  async getAcceptedJourneySnapshot(
+    attribution: ReferralAttribution,
+  ): Promise<ReferralEventRecord[]> {
+    const lifecycle = this.lifecycle;
+    try {
+      const events = await this.boundary(
+        this.storage.getAcceptedAnalyticsEvents(),
+        lifecycle,
+        'accepted analytics snapshot read',
+      );
+      const referrerFlowPrefix = `referrer:${attribution.referralCode}`;
+      const inviteeFlow = `invitee:${attribution.fingerprint}`;
+      return events.filter(({ name, properties }) => {
+        if (properties.referral_code !== attribution.referralCode) return false;
+        if (name === 'referral_link_generated' || name === 'referral_link_shared') {
+          return properties.flow_id.startsWith(referrerFlowPrefix);
+        }
+        return properties.flow_id === inviteeFlow;
+      });
+    } catch {
+      return [];
+    }
   }
 
   private deliverOnce(
     event: ReferralEventRecord,
     milestoneKey: string,
     persistBeforeDelivery: boolean,
+    lifecycle: number,
   ): Promise<AnalyticsDelivery> {
-    const existing = this.inFlightMilestones.get(milestoneKey);
+    const inFlightKey = `${lifecycle}:${milestoneKey}`;
+    const existing = this.inFlightMilestones.get(inFlightKey);
     if (existing) return existing;
 
-    const operation = this.deliverOnceUnlocked(event, milestoneKey, persistBeforeDelivery);
-    this.inFlightMilestones.set(milestoneKey, operation);
-    void operation.finally(() => {
-      if (this.inFlightMilestones.get(milestoneKey) === operation) {
-        this.inFlightMilestones.delete(milestoneKey);
-      }
-    });
+    const operation = this.deliverOnceUnlocked(
+      event,
+      milestoneKey,
+      persistBeforeDelivery,
+      lifecycle,
+    );
+    this.inFlightMilestones.set(inFlightKey, operation);
+    void operation.then(
+      () => this.clearInFlight(inFlightKey, operation),
+      () => this.clearInFlight(inFlightKey, operation),
+    );
     return operation;
   }
 
@@ -131,41 +180,111 @@ export class AnalyticsTracker {
     event: ReferralEventRecord,
     milestoneKey: string,
     persistBeforeDelivery: boolean,
+    lifecycle: number,
   ): Promise<AnalyticsDelivery> {
+    let deliveryEvent = event;
     try {
-      if (await this.storage.hasMilestone(milestoneKey)) {
-        await this.removePendingEventIgnoringFailure(event.properties.event_id);
-        this.emit(event, 'duplicate');
+      if (
+        await this.boundary(
+          this.storage.hasMilestone(milestoneKey),
+          lifecycle,
+          'analytics milestone read',
+        )
+      ) {
+        await this.removePendingEventIgnoringFailure(event.properties.event_id, lifecycle);
+        if (this.isCurrent(lifecycle)) this.emit(event, 'duplicate');
         return 'duplicate';
       }
-      if (persistBeforeDelivery) await this.storage.savePendingAnalyticsEvent(event);
-      await this.client.logEvent(event);
-      await this.storage.markMilestone(milestoneKey);
-      await this.storage.removePendingAnalyticsEvent(event.properties.event_id);
-      this.emit(event, 'accepted');
+      if (persistBeforeDelivery) {
+        deliveryEvent = await this.boundary(
+          this.storage.reservePendingAnalyticsEvent(event),
+          lifecycle,
+          'analytics outbox reservation',
+        );
+      }
+      await this.boundary(
+        this.client.logEvent(deliveryEvent),
+        lifecycle,
+        'analytics client delivery',
+      );
+      await this.boundary(
+        this.storage.markMilestone(milestoneKey, deliveryEvent),
+        lifecycle,
+        'analytics milestone write',
+      );
+      await this.removePendingEventIgnoringFailure(
+        deliveryEvent.properties.event_id,
+        lifecycle,
+      );
+      if (this.isCurrent(lifecycle)) this.emit(deliveryEvent, 'accepted');
       return 'accepted';
-    } catch {
-      this.emit(event, 'failed');
+    } catch (error) {
+      if (!(error instanceof AnalyticsLifecycleCancelledError) && this.isCurrent(lifecycle)) {
+        this.emit(deliveryEvent, 'failed');
+      }
       return 'failed';
     }
   }
 
-  private async deliverBestEffort(event: ReferralEventRecord): Promise<AnalyticsDelivery> {
+  private async deliverBestEffort(
+    event: ReferralEventRecord,
+    lifecycle: number,
+  ): Promise<AnalyticsDelivery> {
     try {
-      await this.client.logEvent(event);
-      this.emit(event, 'accepted');
+      await this.boundary(
+        this.client.logEvent(event),
+        lifecycle,
+        'analytics diagnostic delivery',
+      );
+      if (this.isCurrent(lifecycle)) this.emit(event, 'accepted');
       return 'accepted';
-    } catch {
-      this.emit(event, 'failed');
+    } catch (error) {
+      if (!(error instanceof AnalyticsLifecycleCancelledError) && this.isCurrent(lifecycle)) {
+        this.emit(event, 'failed');
+      }
       return 'failed';
     }
   }
 
-  private async removePendingEventIgnoringFailure(eventId: string): Promise<void> {
+  private async removePendingEventIgnoringFailure(
+    eventId: string,
+    lifecycle: number,
+  ): Promise<void> {
     try {
-      await this.storage.removePendingAnalyticsEvent(eventId);
+      await this.boundary(
+        this.storage.removePendingAnalyticsEvent(eventId),
+        lifecycle,
+        'analytics outbox removal',
+      );
     } catch {
       // A stale outbox item is safe: the durable milestone suppresses redelivery.
+    }
+  }
+
+  private async boundary<T>(
+    operation: Promise<T>,
+    lifecycle: number,
+    operationName: string,
+  ): Promise<T> {
+    const result = await withTimeout(operation, operationName, this.timeoutMs);
+    if (!this.isCurrent(lifecycle)) throw new AnalyticsLifecycleCancelledError();
+    return result;
+  }
+
+  private isCurrent(lifecycle: number): boolean {
+    return lifecycle === this.lifecycle;
+  }
+
+  private nextEventId(): string {
+    return `evt_${this.createEventId().replaceAll('-', '').toLowerCase()}`;
+  }
+
+  private clearInFlight(
+    key: string,
+    operation: Promise<AnalyticsDelivery>,
+  ): void {
+    if (this.inFlightMilestones.get(key) === operation) {
+      this.inFlightMilestones.delete(key);
     }
   }
 
