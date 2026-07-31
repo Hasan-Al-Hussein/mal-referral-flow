@@ -10,10 +10,11 @@ import { useCallback } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { ReferralRuntimeProvider, useReferralRuntime } from './src/application/ReferralRuntime';
+import { MotionProvider, useReducedMotion } from './src/motion/MotionProvider';
 import { InviteScreen } from './src/screens/InviteScreen';
 import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { SuccessScreen } from './src/screens/SuccessScreen';
-import { useAppTheme } from './src/theme/theme';
+import { AppThemeProvider, useAppTheme } from './src/theme/theme';
 
 import type { ReferralAttribution } from './src/domain/referral';
 import type { RootStackParamList } from './src/navigation/types';
@@ -23,6 +24,7 @@ const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
 function AppNavigator(): React.JSX.Element {
   const { isDark, colors } = useAppTheme();
+  const reducedMotion = useReducedMotion();
   const { coordinator } = useReferralRuntime();
   const routeReferral = useCallback((attribution: ReferralAttribution) => {
     if (navigationRef.isReady()) {
@@ -52,7 +54,7 @@ function AppNavigator(): React.JSX.Element {
         initialRouteName="Invite"
         screenOptions={{
           headerShown: false,
-          animation: 'fade_from_bottom',
+          animation: reducedMotion ? 'none' : 'fade_from_bottom',
           contentStyle: { backgroundColor: colors.background },
         }}
       >
@@ -67,9 +69,13 @@ function AppNavigator(): React.JSX.Element {
 export default function App(): React.JSX.Element {
   return (
     <SafeAreaProvider>
-      <ReferralRuntimeProvider>
-        <AppNavigator />
-      </ReferralRuntimeProvider>
+      <AppThemeProvider>
+        <MotionProvider>
+          <ReferralRuntimeProvider>
+            <AppNavigator />
+          </ReferralRuntimeProvider>
+        </MotionProvider>
+      </AppThemeProvider>
     </SafeAreaProvider>
   );
 }

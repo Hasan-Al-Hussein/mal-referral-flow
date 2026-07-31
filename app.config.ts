@@ -42,10 +42,10 @@ export default ({ config }: ConfigContext) => {
 
   return {
     ...config,
-    name: 'Mal Referral Lab',
+    name: 'Mal Referral',
     slug: 'mal-referral-flow',
     version: '1.0.0',
-    orientation: 'portrait',
+    orientation: 'default',
     icon: './assets/icon.png',
     userInterfaceStyle: 'automatic',
     newArchEnabled: true,
@@ -53,7 +53,7 @@ export default ({ config }: ConfigContext) => {
     splash: {
       image: './assets/splash-icon.png',
       resizeMode: 'contain',
-      backgroundColor: '#F5F2FF',
+      backgroundColor: '#D0DDEE',
     },
     ios: {
       supportsTablet: true,
@@ -64,12 +64,6 @@ export default ({ config }: ConfigContext) => {
     android: {
       package: 'com.hasanalhussein.malreferral',
       googleServicesFile: nativeSdkBuild ? googleServicesJson : undefined,
-      adaptiveIcon: {
-        foregroundImage: './assets/android-icon-foreground.png',
-        backgroundImage: './assets/android-icon-background.png',
-        monochromeImage: './assets/android-icon-monochrome.png',
-        backgroundColor: '#F5F2FF',
-      },
       permissions: [
         'com.android.vending.INSTALL_REFERRER',
         'com.google.android.gms.permission.AD_ID',
