@@ -26,15 +26,24 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
   const compact = width < 520;
   const { coordinator, clearLedger, events } = useReferralRuntime();
   const [mobileTraceOpen, setMobileTraceOpen] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const completedSteps = useMemo(
     () => getAcceptedReferralMilestones(events, referralCode).size,
     [events, referralCode],
   );
 
   const restart = async () => {
-    await coordinator.resetDemoState();
-    clearLedger();
-    navigation.popToTop();
+    setIsResetting(true);
+    try {
+      await coordinator.resetDemoState();
+      clearLedger();
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Invite' }],
+      });
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   return (
@@ -85,7 +94,7 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
                   </View>
                   <Text style={[styles.noteText, { color: colors.inkMuted }]}>Production rewards belong to an idempotent backend ledger—not the mobile client.</Text>
                 </View>
-                <Button label="Run the flow again" icon="refresh-cw" fullWidth onPress={() => void restart()} />
+                <Button label="Run the flow again" icon="refresh-cw" loading={isResetting} fullWidth onPress={() => void restart()} />
               </LinearGradient>
             </AnimatedReveal>
 

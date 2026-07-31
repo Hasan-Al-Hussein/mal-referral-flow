@@ -1,8 +1,10 @@
 import { Feather } from '@expo/vector-icons';
-import { useState } from 'react';
-import { Image, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Animated, Image, Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import { radii, typography, useAppTheme } from '../theme/theme';
+import { MotionPressable } from '../motion/MotionPressable';
+import { useReducedMotion } from '../motion/MotionProvider';
+import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 interface BrandHeaderProps {
   integrationMode: 'native' | 'web-demo';
@@ -11,9 +13,28 @@ interface BrandHeaderProps {
 export function BrandHeader({ integrationMode }: BrandHeaderProps): React.JSX.Element {
   const { colors, isDark, toggleTheme } = useAppTheme();
   const { width } = useWindowDimensions();
-  const [themeFocused, setThemeFocused] = useState(false);
+  const reducedMotion = useReducedMotion();
+  const [iconSwap] = useState(() => new Animated.Value(1));
   const isCompact = width < 620;
   const isDemo = integrationMode === 'web-demo';
+
+  useEffect(() => {
+    iconSwap.stopAnimation();
+    if (reducedMotion) {
+      iconSwap.setValue(1);
+      return;
+    }
+    iconSwap.setValue(0.82);
+    const animation = Animated.spring(iconSwap, {
+      toValue: 1,
+      damping: 17,
+      stiffness: 260,
+      mass: 0.68,
+      useNativeDriver: motion.nativeDriver,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [iconSwap, isDark, reducedMotion]);
 
   return (
     <View style={[styles.header, { borderBottomColor: colors.border }]}>
@@ -53,24 +74,56 @@ export function BrandHeader({ integrationMode }: BrandHeaderProps): React.JSX.El
             {isDemo ? (isCompact ? 'REVIEW' : `${Platform.OS.toUpperCase()} REVIEW`) : 'NATIVE SDK'}
           </Text>
         </View>
-        <Pressable
+        <MotionPressable
           accessibilityRole="button"
           accessibilityLabel={`Switch to ${isDark ? 'light' : 'dark'} theme`}
+          borderRadius={22}
+          focusColor={colors.accent}
+          frameStyle={styles.themeFrame}
+          glowColor={colors.accent}
           hitSlop={4}
-          onBlur={() => setThemeFocused(false)}
-          onFocus={() => setThemeFocused(true)}
+          hoverTint={colors.accent}
           onPress={toggleTheme}
-          style={({ pressed }) => [
+          preset="icon"
+          contentStyle={({ pressed }) => [
             styles.themeButton,
             {
               backgroundColor: colors.surfaceGlass,
-              borderColor: themeFocused ? colors.accent : colors.border,
+              borderColor: colors.border,
               opacity: pressed ? 0.72 : 1,
             },
           ]}
         >
-          <Feather name={isDark ? 'sun' : 'moon'} size={17} color={colors.ink} />
-        </Pressable>
+          {({ engagement }) => (
+            <Animated.View
+              style={{
+                transform: [
+                  {
+                    rotate: reducedMotion
+                      ? '0deg'
+                      : engagement.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: ['0deg', isDark ? '10deg' : '-10deg'],
+                        }),
+                  },
+                  {
+                    scale: reducedMotion
+                      ? 1
+                      : Animated.multiply(
+                          iconSwap,
+                          engagement.interpolate({
+                            inputRange: [0, 1],
+                            outputRange: [1, 1.08],
+                          }),
+                        ),
+                  },
+                ],
+              }}
+            >
+              <Feather name={isDark ? 'sun' : 'moon'} size={17} color={colors.ink} />
+            </Animated.View>
+          )}
+        </MotionPressable>
       </View>
     </View>
   );
@@ -139,4 +192,5 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     cursor: Platform.OS === 'web' ? 'pointer' : undefined,
   },
+  themeFrame: { width: 44, height: 44, borderRadius: 22 },
 });

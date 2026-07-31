@@ -32,7 +32,7 @@ The credential-free web path requires no sign-in, Branch account, Firebase proje
 3. Select **Share my invitation**. A supported browser opens Web Share; otherwise the full invite is copied. The ledger records the actual outcome rather than assuming success.
 4. Select **Direct open**. The Branch-shaped payload passes through the production parser and coordinator, then opens onboarding with the referral code visible and locked.
 5. Enter a name and email, then select **Create demo account**. The code is frozen when signup starts and completion is emitted only after the mock endpoint accepts it.
-6. Select **Run the flow again**, reset test state, and try **Deferred first launch**. It uses the same ingestion path with `+is_first_session=true` and is visibly identified as `demo-deferred`.
+6. Select **Run the flow again**. The app clears persisted and visible journey state, remounts a fresh Invite screen at `0/5`, and restores **Generate my referral link**. Generate, share, then try **Deferred first launch**; onboarding should open at `3/5`, use the same ingestion path with `+is_first_session=true`, and identify the source as `demo-deferred`.
 7. Select **Invalid payload** to verify safe rejection and the failure events without unintended navigation.
 
 Useful edge-case checks:
@@ -82,7 +82,7 @@ The interface is a brand-inspired assessment prototype, not a claim to be Mal's 
 
 The signature **Mal Trust Loop** is a five-node orbit mapped directly to the required funnel events. Each node advances only after an accepted milestone, so the visual centerpiece is also a truthful system-state indicator. Technical telemetry remains visible for reviewers on wide screens and collapses behind an explicit control on phones.
 
-Motion is finite and functional: entry reveals, button feedback, referral-code state changes, link handoff, and completion confirmation. Animations use opacity and transforms, stop on cleanup, never delay analytics or navigation, and become immediately static when reduced motion is enabled. The light-first interface also includes a deliberate dark theme rather than relying on a generic system inversion.
+Motion is finite and functional: entry reveals, hover/focus/press feedback, referral-code readiness, reviewer disclosure, signup progress, validation, telemetry changes, link handoff, and completion confirmation. Web controls use a shared 180ms hover language with bounded lift or directional movement, tint, glow, and icon response; primary CTAs add one finite light sweep. Static surfaces remain stable so motion never implies a false action. Animations use opacity and transforms, stop on cleanup, never delay analytics or navigation, and become immediately static when reduced motion is enabled. The light-first interface also includes a deliberate dark theme rather than relying on a generic system inversion.
 
 ## Technology choices
 
@@ -413,7 +413,7 @@ npm run build:web
 
 GitHub Actions runs the same checks on pushes to `main` and on pull requests. Native verification remains separate because it requires provider credentials, signing identities, physical devices, and store/install state.
 
-The rendered reviewer build was also checked at 375 x 812, 812 x 375, and 1440 x 1000 in light and dark themes. The reduced-motion path was verified with `prefers-reduced-motion: reduce`; content remains immediately visible and navigation animation is disabled.
+The rendered reviewer build was also checked at 375 x 812, 812 x 375, and 1440 x 1000 in light and dark themes. The full deferred journey was verified at `3/5` on onboarding and `5/5` on completion, and **Run the flow again** was regression-checked to restore a new Invite route at `0/5` without the previous referral code. The reduced-motion path was verified with `prefers-reduced-motion: reduce`; content remains immediately visible and navigation animation is disabled.
 
 ## Known limitations and proof boundary
 

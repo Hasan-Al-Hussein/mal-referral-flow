@@ -1,5 +1,5 @@
 import { Feather } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -45,6 +45,7 @@ interface EventLedgerProps {
 
 export function EventLedger({ referralCode }: EventLedgerProps): React.JSX.Element {
   const { colors } = useAppTheme();
+  const reducedMotion = useReducedMotion();
   const { events } = useReferralRuntime();
   const scopedEvents = scopeReferralEntries(events, referralCode);
   const scopedCode = referralCode ?? scopedEvents[0]?.event.properties.referral_code;
@@ -52,6 +53,35 @@ export function EventLedger({ referralCode }: EventLedgerProps): React.JSX.Eleme
     ? getAcceptedReferralMilestones(scopedEvents, scopedCode)
     : new Set();
   const completedCount = REQUIRED_REFERRAL_EVENTS.filter((name) => completedNames.has(name)).length;
+  const [counterScale] = useState(() => new Animated.Value(1));
+  const previousCount = useRef(completedCount);
+
+  useEffect(() => {
+    counterScale.stopAnimation();
+    if (reducedMotion || previousCount.current === completedCount) {
+      counterScale.setValue(1);
+      previousCount.current = completedCount;
+      return;
+    }
+    previousCount.current = completedCount;
+    const animation = Animated.sequence([
+      Animated.timing(counterScale, {
+        toValue: 1.08,
+        duration: 90,
+        easing: motion.easeOut,
+        useNativeDriver: motion.nativeDriver,
+      }),
+      Animated.spring(counterScale, {
+        toValue: 1,
+        damping: 18,
+        stiffness: 260,
+        mass: 0.7,
+        useNativeDriver: motion.nativeDriver,
+      }),
+    ]);
+    animation.start();
+    return () => animation.stop();
+  }, [completedCount, counterScale, reducedMotion]);
 
   return (
     <View style={[styles.card, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
@@ -63,9 +93,9 @@ export function EventLedger({ referralCode }: EventLedgerProps): React.JSX.Eleme
           </View>
           <Text style={[styles.title, { color: colors.ink }]}>Referral journey</Text>
         </View>
-        <View style={[styles.counter, { backgroundColor: colors.accentSoft }]}>
+        <Animated.View style={[styles.counter, { backgroundColor: colors.accentSoft, transform: [{ scale: counterScale }] }]}>
           <Text style={[styles.counterText, { color: colors.accentStrong }]}>{completedCount}/5</Text>
-        </View>
+        </Animated.View>
       </View>
       <Text style={[styles.description, { color: colors.inkMuted }]}>Every milestone shown here is scoped to one referral code.</Text>
 

@@ -51,12 +51,17 @@ The **referral orbit** uses five nodes mapped to the five required funnel events
 ## Motion
 
 - Press feedback: 140ms scale to 0.975, spring release.
+- Web hover: 180ms enter / 120ms exit using a 1-2px lift or directional nudge, tint, glow, and icon response.
+- Keyboard focus shares the hover emphasis while retaining a persistent 2px focus ring.
+- Primary CTA hover may use one finite light sweep; secondary, ghost, and danger actions use restrained tint feedback.
 - Status feedback: 220ms opacity + translateY up to 8px.
 - Route/content reveal: 320–360ms opacity + translateY up to 12px.
 - Stagger: 44ms between related items.
+- State transitions: READY, accordion expansion, signup progress, validation, and telemetry counters animate only when their underlying state changes.
 - Success/orbit sequence: finite, state-driven, transform/opacity only.
 - Easing: `Bezier(0.16, 1, 0.3, 1)`.
-- No looping decoration, confetti, parallax, or animation-triggered business logic.
+- Static hero, arrival, link, telemetry, form, and receipt surfaces never lift on hover because they are not actions.
+- No looping decoration, confetti, pointer-following parallax, or animation-triggered business logic.
 - Reduced motion: content appears immediately and navigation animation is disabled.
 
 ## Hierarchy
