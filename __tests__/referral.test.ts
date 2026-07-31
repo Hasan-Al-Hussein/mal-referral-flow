@@ -1,6 +1,8 @@
 import { describe, expect, it } from '@jest/globals';
 
 import {
+  isShareableReferralUrl,
+  parseStoredReferralAttribution,
   REFERRAL_DESTINATION,
   parseReferralAttribution,
   type RawDeepLinkEvent,
@@ -85,7 +87,7 @@ describe('parseReferralAttribution', () => {
     expect(result).toEqual({
       status: 'rejected',
       reason: 'invalid_code',
-      referralCode: 'BAD-CODE',
+      referralCode: 'INVALID',
     });
   });
 
@@ -120,4 +122,114 @@ describe('parseReferralAttribution', () => {
 
     expect(result).toEqual({ status: 'ignored', reason: 'not_a_branch_click' });
   });
+
+  it('redacts malformed and oversized payload values from telemetry-safe parse results', () => {
+    const sensitiveValue = `${'reviewer@example.com'.repeat(300)}-secret`;
+    const result = parseReferralAttribution(
+      branchEvent({
+        params: {
+          '+clicked_branch_link': true,
+          referral_code: sensitiveValue,
+        },
+      }),
+    );
+
+    expect(result).toEqual({
+      status: 'rejected',
+      reason: 'invalid_code',
+      referralCode: 'INVALID',
+    });
+    expect(JSON.stringify(result)).not.toContain('reviewer@example.com');
+  });
+
+  it('classifies provider errors without exposing malformed referral input', () => {
+    expect(
+      parseReferralAttribution({
+        error: 'provider detail remains local',
+        params: { referral_code: 'email@example.com' },
+      }),
+    ).toEqual({
+      status: 'rejected',
+      reason: 'provider_error',
+      referralCode: 'INVALID',
+      detail: 'provider detail remains local',
+    });
+  });
+
+  it('captures Branch match certainty when the provider supplies it', () => {
+    const result = parseReferralAttribution(
+      branchEvent({
+        params: {
+          '+clicked_branch_link': true,
+          '+is_first_session': true,
+          '+match_guaranteed': false,
+          referral_code: DIRECT_CODE,
+        },
+      }),
+      () => NOW,
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status === 'accepted') {
+      expect(result.attribution).toMatchObject({
+        kind: 'deferred',
+        matchGuaranteed: false,
+      });
+    }
+  });
+
+  it('strips callback query and fragment data before persisting attribution', () => {
+    const result = parseReferralAttribution(
+      branchEvent({
+        uri: 'https://mal.test-app.link/referral?email=reviewer@example.com#private',
+      }),
+      () => NOW,
+    );
+
+    expect(result.status).toBe('accepted');
+    if (result.status === 'accepted') {
+      expect(result.attribution.uri).toBe('https://mal.test-app.link/referral');
+      expect(JSON.stringify(result.attribution)).not.toContain('reviewer@example.com');
+    }
+  });
+});
+
+describe('persisted attribution validation', () => {
+  const validAttribution = {
+    referralCode: DIRECT_CODE,
+    destination: REFERRAL_DESTINATION,
+    kind: 'deferred' as const,
+    fingerprint: 'abc1234',
+    receivedAt: NOW.toISOString(),
+    uri: 'https://mal.test-app.link/referral',
+    matchGuaranteed: true,
+  };
+
+  it('accepts a recent, complete attribution record', () => {
+    expect(parseStoredReferralAttribution(validAttribution, () => NOW)).toEqual(
+      validAttribution,
+    );
+  });
+
+  it.each([
+    ['stale', { ...validAttribution, receivedAt: '2026-06-01T00:00:00.000Z' }],
+    ['future-dated', { ...validAttribution, receivedAt: '2026-08-02T00:00:00.000Z' }],
+    ['wrong destination', { ...validAttribution, destination: 'payments/transfer' }],
+    ['bad fingerprint', { ...validAttribution, fingerprint: 'not-valid' }],
+    ['oversized URI', { ...validAttribution, uri: `https://mal.test/${'x'.repeat(2_100)}` }],
+  ])('rejects %s persisted input', (_label, value) => {
+    expect(parseStoredReferralAttribution(value, () => NOW)).toBeNull();
+  });
+});
+
+describe('shareable referral URLs', () => {
+  it.each(['https://mal.test-app.link/r/code', 'https://example.test/?referral_code=MAL-ABCD2345'])(
+    'accepts an HTTPS link: %s',
+    (value) => expect(isShareableReferralUrl(value)).toBe(true),
+  );
+
+  it.each(['', 'not a URL', 'http://insecure.example/r/code', 'malreferral://onboarding'])(
+    'rejects an unusable link: %s',
+    (value) => expect(isShareableReferralUrl(value)).toBe(false),
+  );
 });

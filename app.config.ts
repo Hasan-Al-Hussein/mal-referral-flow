@@ -15,6 +15,17 @@ const branchDomains = [branchDomain, branchAlternateDomain].filter(
 export default ({ config }: ConfigContext) => {
   const plugins: NonNullable<ExpoConfig['plugins']> = ['expo-font'];
 
+  if (nativeSdkBuild && (!branchKey || !branchDomain)) {
+    throw new Error(
+      'NATIVE_SDK_BUILD=1 requires EXPO_PUBLIC_BRANCH_KEY and EXPO_PUBLIC_BRANCH_DOMAIN.',
+    );
+  }
+  if (nativeSdkBuild && (!googleServicesJson || !googleServicesPlist)) {
+    throw new Error(
+      'NATIVE_SDK_BUILD=1 requires GOOGLE_SERVICES_JSON and GOOGLE_SERVICES_PLIST.',
+    );
+  }
+
   if (nativeSdkBuild && branchKey && branchDomain) {
     plugins.push([
       '@config-plugins/react-native-branch',
@@ -66,8 +77,8 @@ export default ({ config }: ConfigContext) => {
       googleServicesFile: nativeSdkBuild ? googleServicesJson : undefined,
       permissions: [
         'com.android.vending.INSTALL_REFERRER',
-        'com.google.android.gms.permission.AD_ID',
       ],
+      blockedPermissions: ['com.google.android.gms.permission.AD_ID'],
       intentFilters: branchDomains.map((domain) => ({
         action: 'VIEW',
         autoVerify: true,
@@ -88,6 +99,7 @@ export default ({ config }: ConfigContext) => {
     extra: {
       nativeSdkBuild,
       branchConfigured: Boolean(branchKey && branchDomain),
+      firebaseConfigured: Boolean(googleServicesJson && googleServicesPlist),
       eas: {
         projectId: process.env.EAS_PROJECT_ID,
       },

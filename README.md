@@ -48,6 +48,7 @@ Useful edge-case checks:
 - [x] Mock authenticated-member referral screen
 - [x] Stable per-member referral code persisted with AsyncStorage
 - [x] Cryptographically random, human-readable `MAL-XXXXXXXX` demo-code generation
+- [x] Concurrent per-member generation coalescing and corrupt-code/URL rejection
 - [x] Real Branch Universal Object and `generateShortUrl()` call shape in the native adapter
 - [x] Native `Share.share()` integration with shared, cancelled, and failed outcomes
 - [x] Branch subscription for cached initial opens and later direct-link opens
@@ -56,7 +57,9 @@ Useful edge-case checks:
 - [x] Pending attribution persisted before analytics or navigation
 - [x] Referral code frozen once signup begins
 - [x] Durable callback and funnel-milestone deduplication
+- [x] Serialized callback/signup transitions and validated 30-day pending-attribution recovery
 - [x] All five required funnel events with referral code and platform context
+- [x] Durable analytics outbox with stable event IDs for adapter-level retry
 - [x] Explicit generation, share, deep-link, code, signup, and duplicate diagnostics
 - [x] Firebase Analytics modular API in the native adapter
 - [x] Visible credential-free event ledger for reviewer verification
@@ -65,6 +68,7 @@ Useful edge-case checks:
 - [x] Finite, state-driven motion with OS/browser reduced-motion support
 - [x] Customer-first mobile layout with reviewer mechanics progressively disclosed
 - [x] Mock signup acceptance and deterministic `+fail` rejection fixture
+- [x] Stable mock signup idempotency keys and persisted non-PII acceptance receipts
 - [x] CI entry point for type checking, linting, tests, and a web export
 
 ### External proof/configuration still required
@@ -165,7 +169,7 @@ Reference: [React Native Firebase Analytics](https://rnfirebase.io/analytics/usa
 flowchart LR
   UI["Invite / Onboarding / Success screens"] --> C["ReferralCoordinator"]
   C --> D["Referral parser + domain policy"]
-  C --> S["AsyncStorage attribution + milestone ledger"]
+  C --> S["AsyncStorage attribution + milestones + analytics outbox"]
   C --> API["Mock referral API"]
   C --> DL["DeepLinkService"]
   C --> SH["ShareService"]
@@ -186,6 +190,7 @@ Key boundaries:
 - **Persistence precedes side effects.** A valid referral is stored before analytics and routing, so a process interruption does not silently discard it.
 - **Navigation readiness is explicit.** A callback arriving before the navigation container is ready is buffered and replayed once safely routable.
 - **Attribution is frozen at signup start.** A later link cannot silently replace the code during an active signup.
+- **Concurrency is explicit.** Callback and signup state transitions are serialized in-process; same-milestone analytics calls coalesce before touching durable receipts.
 - **Client attribution is not reward authority.** A production backend must validate eligibility, expiry, self-referral, and exactly-once reward issuance.
 
 Primary implementation files:
@@ -276,7 +281,7 @@ Copy-Item .env.example .env.local
 | `GOOGLE_SERVICES_PLIST` | Firebase native build | Local path or EAS file-variable path for iOS config |
 | `EAS_PROJECT_ID` | EAS services | Expo project UUID used by build/update/hosting services |
 
-The current shared config enables the Firebase config-plugin block only when **both** Google service-file paths exist, even if building one platform. This keeps the generated cross-platform configuration deterministic.
+The shared config requires the Branch key/domain and both Firebase service-file paths whenever `NATIVE_SDK_BUILD=1`. It fails configuration immediately when any required provider value is absent, rather than producing a native binary with silently omitted integrations. Both service-file paths are required even for a one-platform build so the generated cross-platform configuration remains deterministic.
 
 Example `.env.local` shape:
 
@@ -364,8 +369,9 @@ Every required success event carries the same typed context:
 | `occurred_at_utc` | ISO-8601 string | Client-side occurrence timestamp in UTC |
 | `attribution_kind` | optional string | `direct`, `deferred`, `demo-direct`, or `demo-deferred` |
 | `is_first_session` | optional boolean | Mirrors deferred first-session context |
+| `match_guaranteed` | optional boolean | Preserves Branch match certainty for platform-aware analysis; never authorizes rewards |
 | `share_channel` | optional string | Native share, Web Share, or clipboard fallback |
-| `reason` | optional string | Bounded diagnostic reason; never form data or credentials |
+| `reason` | optional string | Allowlisted bounded diagnostic reason; never form data or credentials |
 
 ### Required funnel events
 
@@ -389,9 +395,9 @@ All five success events require a real, non-empty referral code plus platform co
 - `referral_signup_failed`
 - `referral_duplicate_suppressed`
 
-Failure events include the referral code when one is known and a bounded `reason`. A failure before code creation uses an explicit unavailable sentinel instead of fabricating a valid code.
+Failure events include the referral code when it has passed strict validation and a bounded allowlisted `reason`. A failure before code creation uses `UNAVAILABLE`; malformed untrusted input uses `INVALID`, so raw URLs, email-like strings, provider errors, and form data do not become analytics parameters.
 
-Firebase provides at-least-once-style queued delivery, not end-to-end exactly once. This app provides at-most-once invocation per persisted application milestone and stable `event_id` values; a production warehouse should still deduplicate by `event_id`.
+Firebase provides queued delivery, not end-to-end exactly once. Before a once-only success event is handed to the adapter, this app writes the validated event to a bounded local outbox. Adapter rejection leaves it available for startup retry with the same `event_id`; accepted milestones suppress concurrent/replayed application calls. A crash between provider acceptance and the local receipt can still cause redelivery, so a production warehouse must deduplicate by `event_id`.
 
 ## Verification
 
@@ -413,14 +419,15 @@ npm run build:web
 
 GitHub Actions runs the same checks on pushes to `main` and on pull requests. Native verification remains separate because it requires provider credentials, signing identities, physical devices, and store/install state.
 
-The rendered reviewer build was also checked at 375 x 812, 812 x 375, and 1440 x 1000 in light and dark themes. The full deferred journey was verified at `3/5` on onboarding and `5/5` on completion, and **Run the flow again** was regression-checked to restore a new Invite route at `0/5` without the previous referral code. The reduced-motion path was verified with `prefers-reduced-motion: reduce`; content remains immediately visible and navigation animation is disabled.
+The rendered reviewer build was also checked at 375 x 812, 812 x 375, and 1440 x 1000 in light and dark themes. The full deferred journey was verified at `3/5` on onboarding and `5/5` on completion, and **Run the flow again** was regression-checked to restore a new Invite route at `0/5` with no stale rendered journey; generating again may return the same stable member code by design. The reduced-motion path was verified with `prefers-reduced-motion: reduce`; content remains immediately visible and navigation animation is disabled.
 
 ## Known limitations and proof boundary
 
 - **Web deferred linking is a labeled fixture.** It proves parser, persistence, routing, signup, and analytics behavior after a deferred-shaped callback; it cannot prove OS or app-store attribution.
 - **No provider credentials are committed.** A reviewer can run the web flow immediately. Branch URL serving and Firebase delivery require their own configured projects.
-- **The backend is local.** Code uniqueness is scoped to local demo storage. Global uniqueness, expiry, campaign status, recipient eligibility, self-referral prevention, fraud controls, and reward issuance require a server.
-- **Authentication is a fixture.** The invite screen uses a fixed mock member; the onboarding form creates a demo account only.
+- **The backend is local.** The mock produces a random 40-bit human-readable code and preserves it per fixture member, but it does not enforce global uniqueness. Expiry, campaign status, recipient eligibility, self-referral prevention, fraud controls, account authority, and rewards require a server.
+- **Authentication is a fixture.** The referrer identity is fixed and recipient onboarding assumes an unauthenticated user. A production app must gate routing on real auth hydration and reject already-authenticated/ineligible recipients server-side.
+- **Reset retains member identity.** Reset clears pending/frozen attribution, callback and analytics receipts, outbox items, mock signup receipts, buffered routing, and visible telemetry. It deliberately retains the authenticated member's generated code so `get-or-create` remains stable; the next journey uses whichever code generation returns and starts at `0/5`.
 - **A share success is not a delivery receipt.** It means the platform accepted the share action. Android cannot reliably confirm that a recipient received it.
 - **A sideloaded APK is not store-mediated deferred proof.** Deterministic install-referrer validation requires a real Play/TestFlight path and configured provider dashboards.
 - **Deferred matching may be uncertain.** `+is_first_session` is routing context, not financial authorization. Production UX needs a confirmation/manual-code recovery path.
