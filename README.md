@@ -13,14 +13,14 @@ For the detailed design and reliability analysis, see [docs/ARCHITECTURE.md](doc
 
 ## Submission links
 
-> [!WARNING]
-> **SUBMISSION PLACEHOLDERS — replace every pending value before submitting the assessment.** These are intentionally not fake links.
+> [!NOTE]
+> The public web build is anonymous and was smoke-tested from a fresh browser tab after deployment. Native/store proof remains intentionally separate from the browser simulation.
 
 | Deliverable | Public URL |
 | --- | --- |
-| Live web reviewer build | **PENDING — paste anonymous production URL** |
-| Android preview APK | **PENDING — paste anonymous EAS/GitHub Release URL** |
-| Screen-recorded native walkthrough | **PENDING — paste public YouTube/Drive URL if used** |
+| Live web reviewer build | [hasan-al-hussein.github.io/mal-referral-flow](https://hasan-al-hussein.github.io/mal-referral-flow/) |
+| Android preview APK | Not included — requires reviewer-safe Branch/Firebase test credentials |
+| Screen-recorded native walkthrough | Not needed — the live reviewer build is supplied |
 | GitHub repository | [github.com/Hasan-Al-Hussein/mal-referral-flow](https://github.com/Hasan-Al-Hussein/mal-referral-flow) |
 
 ## Five-minute reviewer path
@@ -66,7 +66,7 @@ Useful edge-case checks:
 
 ### External proof/configuration still required
 
-- [ ] Replace the submission-link placeholders with anonymous public URLs
+- [x] Publish and smoke-test an anonymous reviewer URL
 - [ ] Configure a real Branch test app, link domains, store fallbacks, and signing identities
 - [ ] Configure Android and iOS Firebase apps and verify events in DebugView
 - [ ] Validate Android App Links and iOS Universal Links on physical devices
@@ -208,8 +208,8 @@ npx serve dist
 The web link adapter also accepts a review URL directly. Replace the host with the local or deployed origin:
 
 ```text
-https://YOUR_HOST/?referral_code=MAL-H7K9P2Q4&click_ts=review-001
-https://YOUR_HOST/?referral_code=MAL-H7K9P2Q4&click_ts=review-002&deferred=1
+https://hasan-al-hussein.github.io/mal-referral-flow/?referral_code=MAL-H7K9P2Q4&click_ts=review-001
+https://hasan-al-hussein.github.io/mal-referral-flow/?referral_code=MAL-H7K9P2Q4&click_ts=review-002&deferred=1
 ```
 
 The second URL exercises the **deferred callback state** in the browser. It does not emulate an app-store install and is labeled accordingly in the UI and analytics as `demo-deferred`.
