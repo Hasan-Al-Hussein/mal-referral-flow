@@ -40,23 +40,19 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
   const restart = async () => {
     setIsResetting(true);
     setResetError(null);
-    try {
-      const result = await commitDemoReset(
-        () => coordinator.resetDemoState(),
-        () => {
-          clearLedger();
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Invite' }],
-          });
-        },
-      );
-      if (!result.ok) {
-        setResetError({ committed: result.committed, message: result.message });
-      }
-    } finally {
-      setIsResetting(false);
-    }
+    const result = await commitDemoReset(
+      () => coordinator.resetDemoState(),
+      () => {
+        clearLedger();
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Invite' }],
+        });
+      },
+    );
+    if (result.ok) return;
+    setIsResetting(false);
+    setResetError({ committed: result.committed, message: result.message });
   };
 
   return (
@@ -108,19 +104,21 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
                   <Text style={[styles.noteText, { color: colors.inkMuted }]}>Production rewards belong to an idempotent backend ledger—not the mobile client.</Text>
                 </View>
                 {resetError ? (
-                  <StatusBanner
-                    tone="error"
-                    title={
-                      resetError.committed
-                        ? 'Reset committed; refresh incomplete'
-                        : 'Reset could not be committed'
-                    }
-                    message={
-                      resetError.committed
-                        ? `${resetError.message} Reopen the referral lab to refresh the screen.`
-                        : `${resetError.message} Your completed receipt remains available; try again.`
-                    }
-                  />
+                  <View style={styles.resetError}>
+                    <StatusBanner
+                      tone="error"
+                      title={
+                        resetError.committed
+                          ? 'Reset committed; refresh incomplete'
+                          : 'Reset could not be committed'
+                      }
+                      message={
+                        resetError.committed
+                          ? `${resetError.message} Reopen the referral lab to refresh the screen.`
+                          : `${resetError.message} Your completed receipt remains available; try again.`
+                      }
+                    />
+                  </View>
                 ) : null}
                 <Button label="Run the flow again" icon="refresh-cw" loading={isResetting} fullWidth onPress={() => void restart()} />
               </LinearGradient>
@@ -206,5 +204,6 @@ const styles = StyleSheet.create({
   note: { width: '100%', borderWidth: 1, borderRadius: radii.lg, padding: 15, flexDirection: 'row', gap: 12, alignItems: 'center' },
   noteIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   noteText: { flex: 1, fontFamily: typography.family, fontSize: 13, lineHeight: 20 },
+  resetError: { width: '100%' },
   mobileTrace: { gap: 12 },
 });

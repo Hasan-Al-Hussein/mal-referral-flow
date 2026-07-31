@@ -48,6 +48,8 @@ Primary CTA gradient: `#5222C8 → #2858B9` in light mode and `#633ED6 → #2854
 
 The **referral orbit** uses five nodes mapped to the five required funnel events. A segmented inner rosette references Mal's emblem without replacing or modifying the official lockup. An identity carrier lands on the latest accepted milestone while radial spokes and labels illuminate from the actual accepted event set. The UI never infers prefix events from a count: a standalone deferred callback is `1/5 · Click`, with Create and Share left inactive because those occur on the referrer's device.
 
+The orbit center uses a solid semantic pair rather than a multicolor text backdrop: deep violet or danger with white in light mode, and light violet or danger with charcoal in dark mode. Count text is 17–20px and status text is 10–10.5px; every center pairing must measure at least 4.5:1.
+
 ## Motion
 
 - Press feedback: 140ms scale to 0.975, spring release.

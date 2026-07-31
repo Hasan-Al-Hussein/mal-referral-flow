@@ -143,37 +143,29 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
 
   const reset = async () => {
     setIsResetting(true);
-    try {
-      const result = await commitDemoReset(
-        () => coordinator.resetDemoState(),
-        () => {
-          clearLedger();
-          setReferral(null);
-          setNotice({
-            tone: 'info',
-            title: 'Test state cleared',
-            message: 'Attribution, milestone deduplication, and the visible event trace were reset.',
-          });
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Invite' }],
-          });
-        },
-      );
-      if (!result.ok) {
-        setNotice({
-          tone: 'error',
-          title: result.committed
-            ? 'Reset committed; refresh incomplete'
-            : 'Reset could not be committed',
-          message: result.committed
-            ? `${result.message} Reopen the referral lab to refresh the screen.`
-            : `${result.message} Your current journey is still available; try again.`,
+    setNotice(null);
+    const result = await commitDemoReset(
+      () => coordinator.resetDemoState(),
+      () => {
+        clearLedger();
+        setReferral(null);
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Invite' }],
         });
-      }
-    } finally {
-      setIsResetting(false);
-    }
+      },
+    );
+    if (result.ok) return;
+    setIsResetting(false);
+    setNotice({
+      tone: 'error',
+      title: result.committed
+        ? 'Reset committed; refresh incomplete'
+        : 'Reset could not be committed',
+      message: result.committed
+        ? `${result.message} Reopen the referral lab to refresh the screen.`
+        : `${result.message} Your current journey is still available; try again.`,
+    });
   };
 
   return (

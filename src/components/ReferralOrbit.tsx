@@ -1,5 +1,4 @@
 import { Feather } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useMemo, useState } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
 
@@ -39,7 +38,7 @@ export function ReferralOrbit({
   status = 'default',
   success = false,
 }: ReferralOrbitProps): React.JSX.Element {
-  const { colors } = useAppTheme();
+  const { colors, isDark } = useAppTheme();
   const reducedMotion = useReducedMotion();
   const {
     acceptedStages,
@@ -166,8 +165,10 @@ export function ReferralOrbit({
       : success
         ? 'Verified'
         : currentLabel;
-  const stateColor = hasAttention ? colors.danger : colors.accent;
+  const stateColor = hasAttention ? colors.danger : colors.accentStrong;
   const stateSoft = hasAttention ? colors.dangerSoft : colors.accentSoft;
+  const coreForeground = isDark ? colors.background : colors.white;
+  const coreStateLabel = status === 'attention' ? 'DETAILS' : stateLabel.toUpperCase();
   const entryScale = entry.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] });
   const haloScale = progress.interpolate({
     inputRange: [0, STEP_COUNT],
@@ -267,35 +268,29 @@ export function ReferralOrbit({
             },
           ]}
         >
-          <LinearGradient
-            colors={
-              hasAttention
-                ? [colors.danger, colors.danger]
-                : [colors.brandLilac, colors.accent, colors.brandBlue]
-            }
-            start={{ x: 0.05, y: 0.1 }}
-            end={{ x: 0.95, y: 0.9 }}
+          <View
             style={[
               styles.core,
               {
                 width: size * 0.34,
                 height: size * 0.34,
                 borderRadius: size * 0.17,
+                backgroundColor: stateColor,
               },
             ]}
           >
             <Feather
               name={status === 'rejected' ? 'shield-off' : status === 'attention' ? 'alert-circle' : success ? 'check' : 'send'}
               size={compact ? 15 : 18}
-              color={colors.white}
+              color={coreForeground}
             />
-            <Text style={[styles.coreCount, compact && styles.coreCountCompact, { color: colors.white }]}>
+            <Text style={[styles.coreCount, compact && styles.coreCountCompact, { color: coreForeground }]}>
               {completedCount}/5
             </Text>
-            <Text numberOfLines={1} style={[styles.coreLabel, compact && styles.coreLabelCompact, { color: colors.white }]}>
-              {stateLabel.toUpperCase()}
+            <Text numberOfLines={1} style={[styles.coreLabel, compact && styles.coreLabelCompact, { color: coreForeground }]}>
+              {coreStateLabel}
             </Text>
-          </LinearGradient>
+          </View>
         </View>
 
         {nodes.map((node, index) => {
@@ -426,21 +421,21 @@ const styles = StyleSheet.create({
   core: { alignItems: 'center', justifyContent: 'center', gap: 1, overflow: 'hidden' },
   coreCount: {
     fontFamily: typography.mono,
-    fontSize: 17,
-    lineHeight: 20,
+    fontSize: 20,
+    lineHeight: 23,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
-  coreCountCompact: { fontSize: 14, lineHeight: 17 },
+  coreCountCompact: { fontSize: 17, lineHeight: 20 },
   coreLabel: {
     maxWidth: '88%',
     fontFamily: typography.family,
-    fontSize: 7.5,
-    lineHeight: 10,
+    fontSize: 10.5,
+    lineHeight: 13,
     fontWeight: '800',
-    letterSpacing: 0.55,
+    letterSpacing: 0.4,
   },
-  coreLabelCompact: { fontSize: 6.5, lineHeight: 8, letterSpacing: 0.35 },
+  coreLabelCompact: { fontSize: 10, lineHeight: 12, letterSpacing: 0.25 },
   node: {
     position: 'absolute',
     borderWidth: 1,
