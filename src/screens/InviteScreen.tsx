@@ -1,9 +1,9 @@
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  Animated,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -19,6 +19,8 @@ import { ReferralOrbit } from '../components/ReferralOrbit';
 import { ScreenShell } from '../components/ScreenShell';
 import { StatusBanner } from '../components/StatusBanner';
 import { AnimatedReveal } from '../motion/AnimatedReveal';
+import { MotionPressable } from '../motion/MotionPressable';
+import { useReducedMotion } from '../motion/MotionProvider';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 import type { GeneratedReferral } from '../application/ReferralCoordinator';
@@ -33,6 +35,7 @@ const REVIEW_CODE = 'MAL-H7K9P2Q4';
 
 export function InviteScreen({ navigation }: Props): React.JSX.Element {
   const { colors, isDark } = useAppTheme();
+  const reducedMotion = useReducedMotion();
   const { width } = useWindowDimensions();
   const isWide = width >= 1200;
   const heroWide = width >= 680;
@@ -40,9 +43,10 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
   const [referral, setReferral] = useState<GeneratedReferral | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [labOpen, setLabOpen] = useState(false);
-  const [labFocused, setLabFocused] = useState(false);
+  const [chevronProgress] = useState(() => new Animated.Value(0));
   const [mobileTraceOpen, setMobileTraceOpen] = useState(false);
   const displayCode = referral?.referralCode ?? 'MAL ••••••••';
   const completedSteps = useMemo(() => {
@@ -56,6 +60,22 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
         : 'Deterministic reviewer adapters',
     [coordinator.integrationMode],
   );
+
+  useEffect(() => {
+    chevronProgress.stopAnimation();
+    if (reducedMotion) {
+      chevronProgress.setValue(labOpen ? 1 : 0);
+      return;
+    }
+    const animation = Animated.timing(chevronProgress, {
+      toValue: labOpen ? 1 : 0,
+      duration: motion.state,
+      easing: motion.easeOut,
+      useNativeDriver: motion.nativeDriver,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [chevronProgress, labOpen, reducedMotion]);
 
   const generate = async () => {
     setNotice(null);
@@ -114,15 +134,20 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
   };
 
   const reset = async () => {
-    await coordinator.resetDemoState();
-    clearLedger();
-    setReferral(null);
-    setNotice({
-      tone: 'info',
-      title: 'Test state cleared',
-      message: 'Attribution, milestone deduplication, and the visible event trace were reset.',
-    });
-    navigation.popToTop();
+    setIsResetting(true);
+    try {
+      await coordinator.resetDemoState();
+      clearLedger();
+      setReferral(null);
+      setNotice({
+        tone: 'info',
+        title: 'Test state cleared',
+        message: 'Attribution, milestone deduplication, and the visible event trace were reset.',
+      });
+      navigation.popToTop();
+    } finally {
+      setIsResetting(false);
+    }
   };
 
   return (
@@ -173,10 +198,12 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
                       <View style={styles.codeHeading}>
                         <Text style={[styles.codeLabel, { color: colors.inkSubtle }]}>REFERRAL CODE</Text>
                         {referral ? (
-                          <View style={[styles.readyPill, { backgroundColor: colors.successSoft }]}>
-                            <View style={[styles.readyDot, { backgroundColor: colors.success }]} />
-                            <Text style={[styles.readyText, { color: colors.success }]}>READY</Text>
-                          </View>
+                          <AnimatedReveal variant="scale" duration={motion.state} replayKey={referral.referralCode}>
+                            <View style={[styles.readyPill, { backgroundColor: colors.successSoft }]}>
+                              <View style={[styles.readyDot, { backgroundColor: colors.success }]} />
+                              <Text style={[styles.readyText, { color: colors.success }]}>READY</Text>
+                            </View>
+                          </AnimatedReveal>
                         ) : null}
                       </View>
                       <AnimatedReveal variant="scale" replayKey={displayCode} duration={motion.feedback}>
@@ -228,17 +255,19 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
             {notice ? <StatusBanner {...notice} /> : null}
 
             <View style={[styles.lab, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
-              <Pressable
+              <MotionPressable
                 aria-expanded={labOpen}
                 accessibilityRole="button"
                 accessibilityLabel={labOpen ? 'Hide reviewer controls' : 'Show reviewer controls'}
                 accessibilityState={{ expanded: labOpen }}
-                onBlur={() => setLabFocused(false)}
-                onFocus={() => setLabFocused(true)}
+                borderRadius={radii.lg}
+                focusColor={colors.accent}
+                frameStyle={styles.labMotionHeader}
+                hoverTint={colors.accent}
                 onPress={() => setLabOpen((current) => !current)}
-                style={({ pressed }) => [
+                preset="row"
+                contentStyle={({ pressed }) => [
                   styles.labHeader,
-                  labFocused && { backgroundColor: colors.accentSoft },
                   pressed && styles.labHeaderPressed,
                 ]}
               >
@@ -249,8 +278,25 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
                   <Text style={[styles.labEyebrow, { color: colors.accentStrong }]}>REVIEWER CONTROLS</Text>
                   <Text style={[styles.labTitle, { color: colors.ink }]}>Inspect direct, deferred, and failure paths</Text>
                 </View>
-                <Feather name={labOpen ? 'chevron-up' : 'chevron-down'} color={colors.inkMuted} size={20} />
-              </Pressable>
+                <Animated.View
+                  style={{
+                    transform: [
+                      {
+                        rotate: reducedMotion
+                          ? labOpen
+                            ? '180deg'
+                            : '0deg'
+                          : chevronProgress.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: ['0deg', '180deg'],
+                            }),
+                      },
+                    ],
+                  }}
+                >
+                  <Feather name="chevron-down" color={colors.inkMuted} size={20} />
+                </Animated.View>
+              </MotionPressable>
 
               {labOpen ? (
                 <AnimatedReveal duration={motion.feedback} distance={8}>
@@ -264,15 +310,15 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
                     ) : null}
                     <Text style={[styles.labDescription, { color: colors.inkMuted }]}>Direct and deferred controls inject Branch-shaped payloads. The deferred path represents the callback received on first launch after installation.</Text>
                     <View style={styles.labButtons}>
-                      <Button label="Direct open" icon="corner-down-right" variant="secondary" onPress={() => simulate('direct')} />
-                      <Button label="Deferred first launch" icon="download-cloud" variant="secondary" onPress={() => simulate('deferred')} />
-                      <Button label="Invalid payload" icon="shield-off" variant="danger" onPress={() => simulate('invalid')} />
+                      <Button label="Direct open" icon="corner-down-right" variant="secondary" disabled={isGenerating || isSharing || isResetting} onPress={() => simulate('direct')} />
+                      <Button label="Deferred first launch" icon="download-cloud" variant="secondary" disabled={isGenerating || isSharing || isResetting} onPress={() => simulate('deferred')} />
+                      <Button label="Invalid payload" icon="shield-off" variant="danger" disabled={isGenerating || isSharing || isResetting} onPress={() => simulate('invalid')} />
                     </View>
                     <View style={[styles.techRow, { borderTopColor: colors.border }]}>
                       <Text style={[styles.techText, { color: colors.inkSubtle }]}>{architectureLabel}</Text>
                       <Text style={[styles.techText, { color: colors.inkSubtle }]}>{Platform.OS} · idempotent milestones</Text>
                     </View>
-                    <Button label="Reset test state" icon="refresh-cw" variant="ghost" onPress={() => void reset()} />
+                    <Button label="Reset test state" icon="refresh-cw" variant="ghost" loading={isResetting} disabled={isGenerating || isSharing} onPress={() => void reset()} />
                   </View>
                 </AnimatedReveal>
               ) : null}
@@ -354,6 +400,7 @@ const styles = StyleSheet.create({
   linkLabel: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 0.95 },
   link: { fontFamily: typography.family, fontSize: 13, lineHeight: 19 },
   lab: { borderWidth: 1, borderRadius: radii.lg, overflow: 'hidden' },
+  labMotionHeader: { width: '100%', borderRadius: radii.lg },
   labHeader: { minHeight: 76, paddingHorizontal: 18, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12, cursor: Platform.OS === 'web' ? 'pointer' : undefined },
   labHeaderPressed: { opacity: 0.72 },
   labIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },

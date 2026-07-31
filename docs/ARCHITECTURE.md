@@ -316,7 +316,7 @@ If exact reporting matters, export to BigQuery and deduplicate by `event_id`, or
 - **Progress-integrity tests:** milestones from different referral codes, failed deliveries, duplicates, and diagnostic events cannot combine into a false 5/5 journey.
 - **Adapter tests:** Branch/Firebase fakes assert real method shapes without requiring network credentials.
 
-Loading, sharing, invalid-link, onboarding, and completed UI states were also exercised manually in the reviewer build. Responsive checks covered 375 x 812, 812 x 375, and 1440 x 1000 layouts in light and dark themes. Browser reduced-motion emulation verified immediate content visibility, static state indicators, and disabled route animation. Automated component/accessibility coverage remains a production follow-up.
+Loading, sharing, invalid-link, onboarding, and completed UI states were also exercised manually in the reviewer build. The deferred full-flow regression passed at `3/5` on onboarding and `5/5` after completion. Restart was verified to reset persisted data, analytics, navigation, and Invite-local state together, returning a remounted route at `0/5` with no stale referral code. Responsive checks covered 375 x 812, 812 x 375, and 1440 x 1000 layouts in light and dark themes. Browser reduced-motion emulation verified immediate content visibility, static state indicators, and disabled route animation. Automated component/accessibility coverage remains a production follow-up.
 
 The repository verification gate is:
 

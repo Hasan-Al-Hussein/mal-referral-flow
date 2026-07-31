@@ -1,7 +1,8 @@
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Animated,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
@@ -20,6 +21,7 @@ import { ReferralOrbit } from '../components/ReferralOrbit';
 import { ScreenShell } from '../components/ScreenShell';
 import { StatusBanner } from '../components/StatusBanner';
 import { AnimatedReveal } from '../motion/AnimatedReveal';
+import { useReducedMotion } from '../motion/MotionProvider';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 import type { RootStackParamList } from '../navigation/types';
@@ -107,6 +109,7 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
             label="Back to referral lab"
             icon="arrow-left"
             variant="ghost"
+            disabled={isStarting || isSubmitting}
             onPress={() => navigation.navigate('Invite')}
             style={styles.backButton}
           />
@@ -221,7 +224,13 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                               },
                             ]}
                           />
-                          {fieldErrors.firstName ? <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: colors.danger }]}>{fieldErrors.firstName}</Text> : null}
+                          <View style={styles.errorSlot}>
+                            {fieldErrors.firstName ? (
+                              <AnimatedReveal duration={motion.state} distance={4} replayKey={fieldErrors.firstName}>
+                                <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: colors.danger }]}>{fieldErrors.firstName}</Text>
+                              </AnimatedReveal>
+                            ) : null}
+                          </View>
                         </View>
                         <View style={styles.fieldGroup}>
                           <Text style={[styles.label, { color: colors.ink }]}>Email address</Text>
@@ -259,7 +268,13 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                               },
                             ]}
                           />
-                          {fieldErrors.email ? <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: colors.danger }]}>{fieldErrors.email}</Text> : null}
+                          <View style={styles.errorSlot}>
+                            {fieldErrors.email ? (
+                              <AnimatedReveal duration={motion.state} distance={4} replayKey={fieldErrors.email}>
+                                <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: colors.danger }]}>{fieldErrors.email}</Text>
+                              </AnimatedReveal>
+                            ) : null}
+                          </View>
                         </View>
                         <View style={styles.fieldGroup}>
                           <Text style={[styles.label, { color: colors.ink }]}>Referral code</Text>
@@ -319,9 +334,54 @@ function StepHeader({ step }: { step: 1 | 2 }): React.JSX.Element {
       </View>
       <View style={styles.stepBars}>
         {[1, 2].map((item) => (
-          <View key={item} style={[styles.stepBar, { backgroundColor: item <= step ? colors.accent : colors.border }]} />
+          <AnimatedStepBar key={item} active={item <= step} />
         ))}
       </View>
+    </View>
+  );
+}
+
+function AnimatedStepBar({ active }: { active: boolean }): React.JSX.Element {
+  const { colors } = useAppTheme();
+  const reducedMotion = useReducedMotion();
+  const [progress] = useState(() => new Animated.Value(reducedMotion && active ? 1 : 0));
+
+  useEffect(() => {
+    progress.stopAnimation();
+    if (reducedMotion) {
+      progress.setValue(active ? 1 : 0);
+      return;
+    }
+    const animation = Animated.timing(progress, {
+      toValue: active ? 1 : 0,
+      duration: motion.state,
+      easing: motion.easeOut,
+      useNativeDriver: motion.nativeDriver,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [active, progress, reducedMotion]);
+
+  return (
+    <View style={[styles.stepBar, { backgroundColor: colors.border }]}>
+      <Animated.View
+        style={[
+          styles.stepBarFill,
+          {
+            backgroundColor: colors.accent,
+            opacity: progress,
+            transform: [
+              {
+                scaleX: reducedMotion
+                  ? active
+                    ? 1
+                    : 0
+                  : progress.interpolate({ inputRange: [0, 1], outputRange: [0.08, 1] }),
+              },
+            ],
+          },
+        ]}
+      />
     </View>
   );
 }
@@ -366,7 +426,8 @@ const styles = StyleSheet.create({
   stepEyebrow: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05 },
   stepLabel: { marginTop: 2, fontFamily: typography.family, fontSize: 13, lineHeight: 18, fontWeight: '600' },
   stepBars: { flex: 1, maxWidth: 190, flexDirection: 'row', gap: 7 },
-  stepBar: { flex: 1, height: 5, borderRadius: 3 },
+  stepBar: { flex: 1, height: 5, borderRadius: 3, overflow: 'hidden' },
+  stepBarFill: { width: '100%', height: '100%', borderRadius: 3 },
   formTitle: { fontFamily: typography.family, fontSize: 27, lineHeight: 33, fontWeight: '800', letterSpacing: -0.6 },
   formDescription: { marginTop: 7, fontFamily: typography.family, fontSize: 15, lineHeight: 23 },
   trustList: { gap: 12 },
@@ -378,6 +439,7 @@ const styles = StyleSheet.create({
   label: { fontFamily: typography.family, fontSize: 14, lineHeight: 19, fontWeight: '700' },
   input: { minHeight: 54, borderRadius: radii.md, borderWidth: 1, paddingHorizontal: 15, fontFamily: typography.family, fontSize: 16 },
   fieldError: { fontFamily: typography.family, fontSize: 12, lineHeight: 18, fontWeight: '600' },
+  errorSlot: { minHeight: 18 },
   lockedInput: { minHeight: 54, borderRadius: radii.md, borderWidth: 1, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   lockedCode: { flex: 1, minWidth: 0, fontFamily: typography.mono, fontSize: 14, lineHeight: 20, fontWeight: '700', letterSpacing: 0.7 },
   helper: { fontFamily: typography.family, fontSize: 12, lineHeight: 18 },

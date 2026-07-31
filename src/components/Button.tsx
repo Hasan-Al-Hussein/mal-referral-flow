@@ -1,11 +1,9 @@
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
   Platform,
-  Pressable,
   StyleSheet,
   Text,
   View,
@@ -13,8 +11,9 @@ import {
   type ViewStyle,
 } from 'react-native';
 
+import { MotionPressable } from '../motion/MotionPressable';
 import { useReducedMotion } from '../motion/MotionProvider';
-import { motion, radii, typography, useAppTheme } from '../theme/theme';
+import { radii, typography, useAppTheme } from '../theme/theme';
 
 interface ButtonProps {
   label: string;
@@ -43,8 +42,6 @@ export function Button({
 }: ButtonProps): React.JSX.Element {
   const { colors } = useAppTheme();
   const reducedMotion = useReducedMotion();
-  const [scale] = useState(() => new Animated.Value(1));
-  const [focused, setFocused] = useState(false);
   const isPrimary = variant === 'primary';
   const isDanger = variant === 'danger';
   const inactive = disabled || loading;
@@ -63,80 +60,41 @@ export function Button({
         ? colors.ink
         : colors.inkMuted;
 
-  useEffect(() => {
-    if (reducedMotion) {
-      scale.stopAnimation();
-      scale.setValue(1);
-    }
-
-    return () => scale.stopAnimation();
-  }, [reducedMotion, scale]);
-
-  const pressIn = () => {
-    if (reducedMotion) return;
-    scale.stopAnimation();
-    Animated.timing(scale, {
-      toValue: 0.975,
-      duration: motion.press,
-      easing: motion.easeOut,
-      useNativeDriver: motion.nativeDriver,
-    }).start();
-  };
-
-  const pressOut = () => {
-    scale.stopAnimation();
-    if (reducedMotion) {
-      scale.setValue(1);
-      return;
-    }
-    Animated.spring(scale, {
-      toValue: 1,
-      damping: 18,
-      stiffness: 260,
-      mass: 0.7,
-      useNativeDriver: motion.nativeDriver,
-    }).start();
-  };
-
   return (
-    <Animated.View
-      style={[
-        styles.motionFrame,
+    <MotionPressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ ...accessibilityState, disabled: inactive, busy: loading }}
+      aria-expanded={accessibilityState?.expanded}
+      android_ripple={isPrimary ? { color: 'rgba(255,255,255,0.18)' } : undefined}
+      borderRadius={radii.pill}
+      disabled={inactive}
+      focusColor={colors.accent}
+      frameStyle={[styles.motionFrame, fullWidth && styles.fullWidth, style]}
+      glowColor={isPrimary ? colors.accent : undefined}
+      hoverTint={isDanger ? colors.danger : isPrimary ? colors.white : colors.accent}
+      onPress={onPress}
+      preset="button"
+      transformOnEngagement={variant === 'primary' || variant === 'secondary'}
+      contentStyle={({ pressed }) => [
+        styles.base,
+        {
+          backgroundColor,
+          borderColor:
+            variant === 'secondary'
+              ? colors.borderStrong
+              : isDanger
+                ? colors.danger
+                : backgroundColor,
+          opacity: pressed && reducedMotion ? 0.8 : 1,
+        },
         fullWidth && styles.fullWidth,
-        focused && { borderColor: colors.accent },
-        { transform: [{ scale }] },
-        style,
+        inactive && styles.disabled,
       ]}
     >
-      <Pressable
-        aria-expanded={accessibilityState?.expanded}
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        accessibilityHint={accessibilityHint}
-        accessibilityState={{ ...accessibilityState, disabled: inactive, busy: loading }}
-        android_ripple={isPrimary ? { color: 'rgba(255,255,255,0.18)' } : undefined}
-        disabled={inactive}
-        onBlur={() => setFocused(false)}
-        onFocus={() => setFocused(true)}
-        onPress={onPress}
-        onPressIn={pressIn}
-        onPressOut={pressOut}
-        style={({ pressed }) => [
-          styles.base,
-          {
-            backgroundColor,
-            borderColor:
-              variant === 'secondary'
-                ? colors.borderStrong
-                : isDanger
-                  ? colors.danger
-                  : backgroundColor,
-            opacity: pressed && reducedMotion ? 0.8 : 1,
-          },
-          fullWidth && styles.fullWidth,
-          inactive && styles.disabled,
-        ]}
-      >
+      {({ engagement }) => (
+        <>
         {isPrimary ? (
           <LinearGradient
             colors={[colors.ctaStart, colors.ctaEnd]}
@@ -146,20 +104,56 @@ export function Button({
             style={StyleSheet.absoluteFill}
           />
         ) : null}
+        {isPrimary ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.shine,
+              {
+                opacity: engagement.interpolate({
+                  inputRange: [0, 0.52, 1],
+                  outputRange: [0, 0.28, 0],
+                }),
+                transform: [
+                  { rotate: '18deg' },
+                  {
+                    translateX: engagement.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-90, 280],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
+        ) : null}
         <View style={[styles.content, loading && styles.loadingContent]}>
-          {icon ? <Feather name={icon} color={foregroundColor} size={18} /> : null}
+          {icon ? (
+            <Animated.View
+              style={{
+                transform: [
+                  {
+                    scale: reducedMotion
+                      ? 1
+                      : engagement.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }),
+                  },
+                ],
+              }}
+            >
+              <Feather name={icon} color={foregroundColor} size={18} />
+            </Animated.View>
+          ) : null}
           <Text style={[styles.label, { color: foregroundColor }]}>{label}</Text>
         </View>
         {loading ? <ActivityIndicator color={foregroundColor} size="small" style={styles.loader} /> : null}
-      </Pressable>
-    </Animated.View>
+        </>
+      )}
+    </MotionPressable>
   );
 }
 
 const styles = StyleSheet.create({
   motionFrame: {
-    borderWidth: 2,
-    borderColor: 'transparent',
     borderRadius: radii.pill,
     alignSelf: 'flex-start',
   },
@@ -178,6 +172,14 @@ const styles = StyleSheet.create({
   content: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9 },
   loadingContent: { opacity: 0 },
   loader: { position: 'absolute' },
+  shine: {
+    position: 'absolute',
+    left: -24,
+    top: -36,
+    width: 44,
+    height: 122,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+  },
   label: {
     fontFamily: typography.family,
     fontSize: 15,

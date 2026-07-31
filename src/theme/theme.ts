@@ -167,6 +167,9 @@ export const typography = {
 
 export const motion = {
   press: 140,
+  hoverIn: 180,
+  hoverOut: 120,
+  state: 200,
   feedback: 220,
   route: 320,
   reveal: 360,
