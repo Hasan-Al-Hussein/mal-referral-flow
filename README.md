@@ -88,7 +88,7 @@ This project intentionally pins the Expo/React Native dependency set instead of 
 | Branch Expo config plugin | `13.0.1` |
 | React Native Firebase App/Analytics | `26.0.0` |
 
-`package-lock.json` makes the assessment reproducible, while the tilde on Expo accepts compatible SDK 56 patches. CI uses Node 24, matching the verified local toolchain.
+`package-lock.json` makes the assessment reproducible, while the tilde on Expo accepts compatible SDK 56 patches. CI pins Node `24.13.0` and npm `11.6.2`, matching the verified local toolchain.
 
 Expo provides one TypeScript codebase, a deployable React Native Web artifact, and custom native builds through Prebuild/EAS. This is deliberately **not an Expo Go solution**: Expo Go cannot load the Branch and React Native Firebase native modules or carry this app's associated-domain and intent-filter configuration. Use a development, preview, or production custom build for native verification.
 
