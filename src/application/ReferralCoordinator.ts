@@ -28,6 +28,7 @@ export class ReferralCoordinator {
   private unsubscribeFromLinks: (() => void) | undefined;
   private navigator: ReferralNavigator | undefined;
   private bufferedRoute: ReferralAttribution | undefined;
+  private shareAttemptSequence = 0;
 
   constructor(
     private readonly deepLinks: DeepLinkService,
@@ -84,7 +85,8 @@ export class ReferralCoordinator {
 
   async shareReferral(referral: GeneratedReferral): Promise<ShareResult> {
     const result = await this.shareService.shareReferral(referral.url, referral.referralCode);
-    const flowId = `referrer:${referral.referralCode}`;
+    this.shareAttemptSequence += 1;
+    const flowId = `referrer:${referral.referralCode}:share:${Date.now().toString(36)}:${this.shareAttemptSequence}`;
 
     if (result.status === 'shared') {
       await this.analytics.track('referral_link_shared', referral.referralCode, flowId, {
@@ -154,7 +156,6 @@ export class ReferralCoordinator {
         flowId,
         { attributionKind: attribution.kind, reason: 'callback_replayed', once: false },
       );
-      this.route(attribution);
       return;
     }
 

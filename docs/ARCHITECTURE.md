@@ -43,22 +43,30 @@ The native adapter uses the real React Native SDK shapes:
 
 ```ts
 const buo = await branch.createBranchUniversalObject(`referral/${code}`, {
-  title: 'Join Mal',
-  contentDescription: 'Open Mal with your referral already applied',
+  title: 'Join me on Mal',
+  contentDescription: 'Open a Mal account with my referral code already applied.',
   contentMetadata: { customMetadata: { referral_code: code } },
 });
 
-const { url } = await buo.generateShortUrl(
-  { feature: 'referral', campaign: 'member_get_member' },
-  {
-    $deeplink_path: 'onboarding/referral',
-    $canonical_url: `https://example.invalid/referral/${code}`,
-    $fallback_url: 'https://example.invalid/referral',
-  },
-);
+try {
+  const { url } = await buo.generateShortUrl(
+    {
+      feature: 'referral',
+      channel: 'in_app_share',
+      campaign: 'member_referral',
+    },
+    {
+      $deeplink_path: 'onboarding/referral',
+      referral_code: code,
+    },
+  );
+  return url;
+} finally {
+  buo.release();
+}
 ```
 
-The `.invalid` URLs above illustrate the shape only. A deployment must replace them with Mal-controlled HTTPS destinations and configured Branch domains.
+The implementation releases the native Branch object in `finally`. Mal-controlled Branch domains, store destinations, and web fallbacks are provider-dashboard configuration supplied outside source control.
 
 References:
 
@@ -95,7 +103,7 @@ Dependency inversion keeps the coordinator unaware of Branch, Firebase, React Na
 
 ## Referral lifecycle
 
-The flow is modeled as explicit state rather than inferred from which screen happens to be visible:
+The lifecycle below is the design model. The prototype exposes these states through explicit screen status fields and the coordinator's persisted attribution milestones:
 
 ```text
 idle
@@ -126,7 +134,7 @@ Android does not reliably prove that a recipient received the content after the 
 
 ### Link creation failure
 
-If code generation or Branch URL creation fails, the UI preserves any already-generated code, shows a retry action, and does not emit a success event. The app must not fabricate a link that looks production-ready. A cached previously generated Branch URL may be reused while offline if it belongs to the same authenticated user and code.
+If code generation or Branch URL creation fails, the UI shows a retryable error and does not emit a success event. The app does not fabricate a link that looks production-ready. Persisting and reusing a provider-issued URL offline is a possible production extension, not behavior claimed by this prototype.
 
 ## Direct and deferred deep links
 
@@ -148,9 +156,9 @@ The coordinator accepts only callbacks where `+clicked_branch_link === true`, th
 
 - `referral_code`
 - `+is_first_session`
-- `+match_guaranteed`
 - `+click_timestamp`
-- `+url` and `~id` when available
+- `$deeplink_path`
+- the callback URI, when supplied
 
 The route is fixed by application policy. Link data cannot request arbitrary screens or redirect URLs.
 
@@ -169,7 +177,7 @@ The route is fixed by application policy. Link data cannot request arbitrary scr
 Navigation and authentication hydrate asynchronously. A valid referral is therefore persisted before either dependency is consulted. Once both are ready:
 
 - An unauthenticated recipient is routed to referred onboarding with a visible, pre-applied code.
-- An already authenticated account is shown an ineligibility message; referral attribution is not retroactively applied.
+- In production, an already authenticated account should be shown an ineligibility message instead of receiving retroactive attribution. The assessment fixture focuses on the new-user path.
 - Before signup begins, a newer explicit valid click may replace the pending code.
 - Once signup begins, the chosen code is frozen to prevent attribution hijacking.
 - Completion or definitive rejection clears the pending record.
@@ -187,13 +195,14 @@ All required success events pass through one typed function. Every payload conta
 ```ts
 type ReferralAnalyticsContext = {
   referral_code: string;
-  platform: 'ios' | 'android' | 'web';
+  platform: 'ios' | 'android' | 'web' | 'windows' | 'macos' | 'unknown';
   event_id: string;
   flow_id: string;
   schema_version: 1;
   app_version: string;
   occurred_at_utc: string;
-  is_deferred: boolean;
+  attribution_kind?: 'direct' | 'deferred' | 'demo-direct' | 'demo-deferred';
+  is_first_session?: boolean;
 };
 ```
 
@@ -223,7 +232,7 @@ Failure events make silent production gaps observable:
 - `referral_signup_failed`
 - `referral_duplicate_suppressed`
 
-They include `failure_stage`, a bounded non-sensitive `reason`, and the referral code when one is known. A failure before any code exists must not invent one merely to satisfy a schema.
+They include a bounded non-sensitive `reason` and the referral code when one is known. Failures before code creation use the explicit `UNAVAILABLE` sentinel; no user identifier or fabricated valid-looking code is logged.
 
 ## Idempotency and delivery semantics
 
@@ -232,35 +241,35 @@ They include `failure_stage`, a bounded non-sensitive `reason`, and the referral
 Branch callbacks can repeat after remounts, React development behavior, warm opens, or SDK retries. A durable fingerprint is derived from the strongest available fields:
 
 ```text
-hash(referral_code | +url | ~id | +click_timestamp | +is_first_session)
+hash(referral_code | +click_timestamp | callback_uri | attribution_kind)
 ```
 
 The coordinator stores processed fingerprints. A repeated callback may emit `referral_duplicate_suppressed` for diagnostics but cannot navigate or advance milestones again. A genuine later click normally has a different click timestamp and remains eligible.
 
 ### Funnel milestone deduplication
 
-Each referral journey has a stable `flow_id`; each deliberate signup has a stable `signup_attempt_id`. A persisted milestone ledger prevents screen remounts from re-emitting `clicked`, `started`, or `completed`. Separate share button taps intentionally receive distinct attempt IDs because they are distinct user actions.
+Each accepted invitee journey has a stable `flow_id` derived from the attribution fingerprint. A persisted milestone ledger prevents screen remounts from re-emitting `clicked`, `started`, or `completed`. Separate share button taps receive distinct flow and event IDs because they are distinct user actions.
 
 ### Exactly-once boundaries
 
 Exactly-once analytics cannot be guaranteed between a mobile process and Firebase Analytics. `logEvent()` accepts data into a native queue but does not acknowledge final warehouse ingestion. The prototype therefore provides:
 
-- at-most-once application invocation per durable state transition;
+- deduplicated application invocation after a milestone is accepted locally;
 - stable `event_id` values for downstream deduplication;
 - Firebase's native offline batching and retries;
-- no custom blind retry loop around `logEvent()`.
+- retryability when the analytics adapter rejects before a milestone is marked, using the same stable event ID.
 
 If exact reporting matters, export to BigQuery and deduplicate by `event_id`, or send business-critical events through an idempotent server collector. Referral acceptance and reward issuance must be exactly-once at the business layer using a server idempotency key, a transaction, and uniqueness constraints. Analytics is never the source of truth for money.
 
 ## Reliability behavior
 
 - **Offline before generation:** show a retryable error; do not claim a link was generated.
-- **Offline after a cached link exists:** permit sharing the cached valid URL and let Firebase buffer events.
-- **Offline during signup:** preserve pending attribution and reuse the same signup idempotency key on retry.
+- **Offline after link generation:** the in-memory URL remains shareable for the current session and Firebase owns native event batching.
+- **Offline during production signup:** the backend integration must preserve pending attribution and reuse a stable server idempotency key; the local assessment endpoint is intentionally network-free.
 - **Process death after link capture:** pending attribution survives and resumes after auth/navigation hydration.
 - **Navigation not ready:** queue a typed navigation intent rather than calling a navigation ref prematurely.
-- **Analytics unavailable:** never block sharing or signup; retain the domain milestone and surface diagnostic state in development.
-- **Storage unavailable:** continue in memory for the session, report degraded durability, and avoid claiming deferred persistence.
+- **Analytics unavailable:** never block sharing or signup; keep attribution retryable and do not mark an unaccepted analytics milestone.
+- **Storage unavailable:** treat durable attribution as degraded and surface a recoverable error; an in-memory fallback is a production follow-up, not implemented here.
 - **Multiple links:** accept the newest valid explicit click only before signup starts; freeze afterwards.
 - **Stale codes:** production expiry is determined by server UTC, not the device clock.
 
@@ -299,14 +308,14 @@ If exact reporting matters, export to BigQuery and deduplicate by `event_id`, or
 
 ## Testing strategy
 
-### Automated tests
+### Automated tests included
 
 - **Domain tests:** code format, attribution parsing, Branch flag interpretation, invalid and oversized inputs.
-- **State-machine tests:** legal transitions, frozen attribution, completion/rejection clearing, and recovery.
-- **Coordinator tests:** callback before readiness, delayed auth, duplicate replay, multiple links, offline retries, and process-restored pending data.
+- **Coordinator tests:** persistence-before-routing, direct/deferred intake, duplicate replay, multiple links, frozen attribution, completion clearing, and analytics retryability.
 - **Analytics contract tests:** all five required events contain `referral_code`, `platform`, `event_id`, `flow_id`, and `schema_version`.
 - **Adapter tests:** Branch/Firebase fakes assert real method shapes without requiring network credentials.
-- **UI tests:** loading, ready, sharing, cancelled, invalid, offline, and completed states remain actionable and accessible.
+
+Loading, sharing, invalid-link, onboarding, and completed UI states were also exercised manually in the deployed reviewer build. Automated component/accessibility coverage is a production follow-up.
 
 The repository verification gate is:
 

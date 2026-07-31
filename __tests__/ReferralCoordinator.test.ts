@@ -324,7 +324,7 @@ describe('ReferralCoordinator', () => {
       reason: 'callback_replayed',
     });
     expect(storage.processedAttributions.size).toBe(1);
-    expect(navigated).toHaveLength(2);
+    expect(navigated).toHaveLength(1);
   });
 
   it('emits the complete required funnel with common analytics properties', async () => {
@@ -363,6 +363,19 @@ describe('ReferralCoordinator', () => {
     expect(result).toEqual({ accountId: 'acct_test_123', referralCode: CODE_A });
     await expect(storage.getPendingAttribution()).resolves.toBeNull();
     await expect(storage.getFrozenReferralCode()).resolves.toBeNull();
+  });
+
+  it('records deliberate repeat shares as distinct user attempts', async () => {
+    const { coordinator, analyticsClient } = createHarness();
+    const generated = await coordinator.generateReferral('authenticated-user-1');
+
+    await coordinator.shareReferral(generated);
+    await coordinator.shareReferral(generated);
+
+    const shares = eventsNamed(analyticsClient, 'referral_link_shared');
+    expect(shares).toHaveLength(2);
+    expect(shares[0]?.properties.event_id).not.toBe(shares[1]?.properties.event_id);
+    expect(shares[0]?.properties.flow_id).not.toBe(shares[1]?.properties.flow_id);
   });
 
   it('freezes the referral code at signup start and ignores later code substitution', async () => {
