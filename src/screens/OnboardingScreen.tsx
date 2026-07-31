@@ -22,6 +22,7 @@ import { ReferralOrbit } from '../components/ReferralOrbit';
 import { ScreenShell } from '../components/ScreenShell';
 import { StatusBanner } from '../components/StatusBanner';
 import { AnimatedReveal } from '../motion/AnimatedReveal';
+import { MotionFieldFrame } from '../motion/MotionFieldFrame';
 import { useReducedMotion } from '../motion/MotionProvider';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
@@ -31,6 +32,10 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 type Props = NativeStackScreenProps<RootStackParamList, 'Onboarding'>;
 type FieldErrors = { firstName?: string; email?: string };
 
+function isValidEmail(value: string): boolean {
+  return /^\S+@\S+\.\S+$/.test(value.trim().toLowerCase());
+}
+
 export function OnboardingScreen({ route, navigation }: Props): React.JSX.Element {
   const { attribution } = route.params;
   const { colors, isDark } = useAppTheme();
@@ -38,6 +43,8 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
   const isWide = width >= 1200;
   const arrivalWide = width >= 650;
   const { coordinator, events } = useReferralRuntime();
+  const isSimulatedDeferred =
+    Platform.OS === 'web' && attribution.kind === 'demo-deferred';
   const [hasStarted, setHasStarted] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [email, setEmail] = useState('');
@@ -50,13 +57,20 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
   const firstNameRef = useRef<TextInput>(null);
   const emailRef = useRef<TextInput>(null);
   const submissionLock = useRef(false);
-  const completedSteps = useMemo(() => {
+  const activeMilestones = useMemo(() => {
     return getAcceptedReferralMilestones(
       events,
       attribution.referralCode,
       attribution.fingerprint,
-    ).size;
+    );
   }, [attribution.fingerprint, attribution.referralCode, events]);
+  const formHasError = Boolean(fieldErrors.firstName || fieldErrors.email || serverError);
+
+  useEffect(() => {
+    if (!hasStarted) return;
+    const frame = requestAnimationFrame(() => firstNameRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [hasStarted]);
 
   const begin = async () => {
     setServerError(null);
@@ -64,7 +78,6 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
     try {
       await coordinator.beginSignup(attribution.referralCode, attribution);
       setHasStarted(true);
-      requestAnimationFrame(() => firstNameRef.current?.focus());
     } catch (caught) {
       setServerError(caught instanceof Error ? caught.message : 'Signup could not be started.');
     } finally {
@@ -78,7 +91,7 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
     const normalizedEmail = email.trim().toLowerCase();
     const nextErrors: FieldErrors = {};
     if (!firstName.trim()) nextErrors.firstName = 'Enter your first name.';
-    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) nextErrors.email = 'Enter a valid email address.';
+    if (!isValidEmail(normalizedEmail)) nextErrors.email = 'Enter a valid email address.';
     setFieldErrors(nextErrors);
     if (nextErrors.firstName) {
       firstNameRef.current?.focus();
@@ -121,14 +134,24 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
             style={styles.backButton}
           />
           <PageIntro
-            eyebrow={attribution.kind.includes('deferred') ? 'FIRST-LAUNCH ATTRIBUTION' : 'REFERRED ONBOARDING'}
+            eyebrow={
+              isSimulatedDeferred
+                ? 'SIMULATED FIRST-LAUNCH CALLBACK'
+                : attribution.kind.includes('deferred')
+                  ? 'FIRST-LAUNCH ATTRIBUTION'
+                  : 'REFERRED ONBOARDING'
+            }
             title="Your invitation found you."
-            description="The referral was validated and saved before this screen opened, so the right invitation stays attached throughout signup."
+            description={
+              isSimulatedDeferred
+                ? 'This web reviewer fixture validates and persists a deferred-shaped callback before onboarding.'
+                : 'The referral was validated and saved before this screen opened, so the right invitation stays attached throughout signup.'
+            }
           />
 
           <View style={[styles.columns, !isWide && styles.stacked]}>
             <View style={styles.mainColumn}>
-              <AnimatedReveal delay={motion.stagger * 2}>
+              <AnimatedReveal delay={motion.stagger * 2} distance={18} variant="forward">
                 <LinearGradient
                   colors={
                     isDark
@@ -149,8 +172,36 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                         <Text style={[styles.arrivalMeta, { color: colors.inkMuted }]}>{attribution.kind.replace('-', ' ')} · destination verified</Text>
                       </View>
                     </View>
+                    {isSimulatedDeferred ? (
+                      <View
+                        accessibilityLabel="Reviewer fixture. No app-store install occurred."
+                        style={[
+                          styles.fixtureBadge,
+                          { backgroundColor: colors.accentSoft, borderColor: colors.accent },
+                        ]}
+                      >
+                        <Feather name="monitor" color={colors.accentStrong} size={14} />
+                        <Text style={[styles.fixtureBadgeText, { color: colors.accentStrong }]}>
+                          REVIEWER FIXTURE · NO APP-STORE INSTALL
+                        </Text>
+                      </View>
+                    ) : null}
                     <Text style={[styles.arrivalTitle, { color: colors.ink }]}>The link survived the handoff.</Text>
                     <Text style={[styles.arrivalDescription, { color: colors.inkMuted }]}>The code is persisted before navigation and becomes immutable when signup starts.</Text>
+                    {isSimulatedDeferred ? (
+                      <View
+                        style={[
+                          styles.deviceHandoffNote,
+                          { backgroundColor: colors.surfaceGlass, borderColor: colors.borderStrong },
+                        ]}
+                      >
+                        <Feather name="repeat" color={colors.accentStrong} size={16} />
+                        <Text style={[styles.deviceHandoffText, { color: colors.inkMuted }]}>
+                          A standalone 1/5 is expected: generation and sharing occur on the
+                          referrer’s device; click, start, and completion occur on the invitee’s.
+                        </Text>
+                      </View>
+                    ) : null}
                     <View style={[styles.appliedCode, { backgroundColor: colors.surfaceGlass, borderColor: colors.borderStrong }]}>
                       <View style={styles.appliedCodeCopy}>
                         <Text style={[styles.codeLabel, { color: colors.inkSubtle }]}>APPLIED CODE</Text>
@@ -162,17 +213,22 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                     </View>
                   </View>
                   <View style={styles.arrivalOrbit}>
-                    <ReferralOrbit activeSteps={completedSteps} size={arrivalWide ? 188 : 170} />
+                    <ReferralOrbit
+                      activeMilestones={activeMilestones}
+                      size={arrivalWide ? 188 : 170}
+                      status={formHasError ? 'attention' : 'default'}
+                    />
                   </View>
                 </LinearGradient>
               </AnimatedReveal>
 
-              <AnimatedReveal replayKey={hasStarted} distance={10}>
+              <AnimatedReveal delay={motion.stagger * 3} distance={18} variant="forward">
                 <View style={[styles.formCard, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
                   <StepHeader step={hasStarted ? 2 : 1} />
 
                   {!hasStarted ? (
-                    <>
+                    <AnimatedReveal replayKey="signup-introduction" distance={16} variant="forward">
+                      <View style={styles.formStage}>
                       <View>
                         <Text style={[styles.formTitle, { color: colors.ink }]}>Open your Mal account</Text>
                         <Text style={[styles.formDescription, { color: colors.inkMuted }]}>Your referral remains protected as you move into the secure signup flow.</Text>
@@ -184,9 +240,11 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                       </View>
                       {serverError ? <StatusBanner tone="error" title="Signup could not start" message={serverError} /> : null}
                       <Button label="Start secure signup" icon="arrow-right" loading={isStarting} fullWidth onPress={() => void begin()} />
-                    </>
+                      </View>
+                    </AnimatedReveal>
                   ) : (
-                    <>
+                    <AnimatedReveal replayKey="signup-details" distance={18} variant="forward">
+                      <View style={styles.formStage}>
                       <View>
                         <Text style={[styles.formTitle, { color: colors.ink }]}>A few details to continue</Text>
                         <Text style={[styles.formDescription, { color: colors.inkMuted }]}>This assessment uses a local endpoint. Nothing entered here leaves the device.</Text>
@@ -195,90 +253,95 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                       <View style={styles.fields}>
                         <View style={styles.fieldGroup}>
                           <Text style={[styles.label, { color: colors.ink }]}>First name</Text>
-                          <TextInput
-                            ref={firstNameRef}
-                            accessibilityLabel="First name"
-                            accessibilityHint="Required"
-                            autoComplete="name-given"
-                            autoCapitalize="words"
-                            placeholder="Your first name"
-                            placeholderTextColor={colors.inkSubtle}
-                            editable={!isSubmitting}
-                            value={firstName}
-                            onBlur={() => {
-                              setFocusedField((current) => (current === 'firstName' ? null : current));
-                              if (!firstName.trim()) setFieldErrors((current) => ({ ...current, firstName: 'Enter your first name.' }));
-                            }}
-                            onFocus={() => setFocusedField('firstName')}
-                            onChangeText={(value) => {
-                              setFirstName(value);
-                              if (fieldErrors.firstName) {
-                                setFieldErrors(({ firstName: _ignored, ...current }) => current);
-                              }
-                            }}
-                            returnKeyType="next"
-                            onSubmitEditing={() => emailRef.current?.focus()}
-                            style={[
-                              styles.input,
-                              {
-                                color: colors.ink,
-                                backgroundColor: colors.surfaceElevated,
-                                borderColor: fieldErrors.firstName
-                                  ? colors.danger
-                                  : focusedField === 'firstName'
-                                    ? colors.accent
-                                    : colors.borderStrong,
-                              },
-                            ]}
-                          />
+                          <MotionFieldFrame
+                            backgroundColor={colors.surfaceElevated}
+                            borderColor={fieldErrors.firstName ? colors.danger : colors.borderStrong}
+                            error={Boolean(fieldErrors.firstName)}
+                            focusColor={colors.accent}
+                            focused={focusedField === 'firstName'}
+                            style={styles.inputFrame}
+                          >
+                            <TextInput
+                              ref={firstNameRef}
+                              accessibilityLabel="First name"
+                              accessibilityHint="Required"
+                              aria-describedby={fieldErrors.firstName ? 'first-name-error' : undefined}
+                              aria-invalid={Boolean(fieldErrors.firstName)}
+                              autoComplete="name-given"
+                              autoCapitalize="words"
+                              placeholder="Your first name"
+                              placeholderTextColor={colors.inkSubtle}
+                              editable={!isSubmitting}
+                              value={firstName}
+                              onBlur={() => {
+                                setFocusedField((current) => (current === 'firstName' ? null : current));
+                                if (!firstName.trim()) setFieldErrors((current) => ({ ...current, firstName: 'Enter your first name.' }));
+                              }}
+                              onFocus={() => setFocusedField('firstName')}
+                              onChangeText={(value) => {
+                                setFirstName(value);
+                                if (fieldErrors.firstName) {
+                                  setFieldErrors(({ firstName: _ignored, ...current }) => current);
+                                }
+                              }}
+                              returnKeyType="next"
+                              onSubmitEditing={() => emailRef.current?.focus()}
+                              style={[styles.input, { color: colors.ink }]}
+                            />
+                          </MotionFieldFrame>
                           <View style={styles.errorSlot}>
                             {fieldErrors.firstName ? (
                               <AnimatedReveal duration={motion.state} distance={4} replayKey={fieldErrors.firstName}>
-                                <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: colors.danger }]}>{fieldErrors.firstName}</Text>
+                                <Text nativeID="first-name-error" accessibilityLiveRegion="polite" style={[styles.fieldError, { color: colors.danger }]}>{fieldErrors.firstName}</Text>
                               </AnimatedReveal>
                             ) : null}
                           </View>
                         </View>
                         <View style={styles.fieldGroup}>
                           <Text style={[styles.label, { color: colors.ink }]}>Email address</Text>
-                          <TextInput
-                            ref={emailRef}
-                            accessibilityLabel="Email address"
-                            accessibilityHint="Required"
-                            autoComplete="email"
-                            autoCapitalize="none"
-                            keyboardType="email-address"
-                            placeholder="you@example.com"
-                            placeholderTextColor={colors.inkSubtle}
-                            editable={!isSubmitting}
-                            value={email}
-                            onBlur={() => setFocusedField((current) => (current === 'email' ? null : current))}
-                            onFocus={() => setFocusedField('email')}
-                            onChangeText={(value) => {
-                              setEmail(value);
-                              if (fieldErrors.email) {
-                                setFieldErrors(({ email: _ignored, ...current }) => current);
-                              }
-                            }}
-                            returnKeyType="done"
-                            onSubmitEditing={() => void complete()}
-                            style={[
-                              styles.input,
-                              {
-                                color: colors.ink,
-                                backgroundColor: colors.surfaceElevated,
-                                borderColor: fieldErrors.email
-                                  ? colors.danger
-                                  : focusedField === 'email'
-                                    ? colors.accent
-                                    : colors.borderStrong,
-                              },
-                            ]}
-                          />
+                          <MotionFieldFrame
+                            backgroundColor={colors.surfaceElevated}
+                            borderColor={fieldErrors.email ? colors.danger : colors.borderStrong}
+                            error={Boolean(fieldErrors.email)}
+                            focusColor={colors.accent}
+                            focused={focusedField === 'email'}
+                            style={styles.inputFrame}
+                          >
+                            <TextInput
+                              ref={emailRef}
+                              accessibilityLabel="Email address"
+                              accessibilityHint="Required"
+                              aria-describedby={fieldErrors.email ? 'email-error' : undefined}
+                              aria-invalid={Boolean(fieldErrors.email)}
+                              autoComplete="email"
+                              autoCapitalize="none"
+                              keyboardType="email-address"
+                              placeholder="you@example.com"
+                              placeholderTextColor={colors.inkSubtle}
+                              editable={!isSubmitting}
+                              value={email}
+                              onBlur={() => {
+                                setFocusedField((current) => (current === 'email' ? null : current));
+                                if (!isValidEmail(email)) {
+                                  setFieldErrors((current) => ({ ...current, email: 'Enter a valid email address.' }));
+                                }
+                              }}
+                              onFocus={() => setFocusedField('email')}
+                              onChangeText={(value) => {
+                                setEmail(value);
+                                if (fieldErrors.email) {
+                                  setFieldErrors(({ email: _ignored, ...current }) => current);
+                                }
+                              }}
+                              returnKeyType="done"
+                              onSubmitEditing={() => void complete()}
+                              style={[styles.input, { color: colors.ink }]}
+                            />
+                          </MotionFieldFrame>
                           <View style={styles.errorSlot}>
                             {fieldErrors.email ? (
                               <AnimatedReveal duration={motion.state} distance={4} replayKey={fieldErrors.email}>
-                                <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: colors.danger }]}>{fieldErrors.email}</Text>
+                                <Text nativeID="email-error" accessibilityLiveRegion="polite" style={[styles.fieldError, { color: colors.danger }]}>{fieldErrors.email}</Text>
                               </AnimatedReveal>
                             ) : null}
                           </View>
@@ -295,7 +358,8 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                       {serverError ? <StatusBanner tone="error" title="Signup could not be completed" message={serverError} /> : null}
                       <Button label="Create demo account" icon="check-circle" loading={isSubmitting} fullWidth onPress={() => void complete()} />
                       <Text style={[styles.terms, { color: colors.inkSubtle }]}>Assessment fixture only—this does not create a real financial account.</Text>
-                    </>
+                      </View>
+                    </AnimatedReveal>
                   )}
                 </View>
               </AnimatedReveal>
@@ -426,8 +490,42 @@ const styles = StyleSheet.create({
   arrivalIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   arrivalEyebrow: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05 },
   arrivalMeta: { marginTop: 2, fontFamily: typography.family, fontSize: 12, lineHeight: 18, textTransform: 'capitalize' },
+  fixtureBadge: {
+    alignSelf: 'flex-start',
+    minHeight: 30,
+    borderWidth: 1,
+    borderRadius: radii.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  fixtureBadgeText: {
+    flexShrink: 1,
+    fontFamily: typography.family,
+    fontSize: 9,
+    lineHeight: 13,
+    fontWeight: '800',
+    letterSpacing: 0.65,
+  },
   arrivalTitle: { fontFamily: typography.family, fontSize: 25, lineHeight: 31, fontWeight: '800', letterSpacing: -0.55 },
   arrivalDescription: { fontFamily: typography.family, fontSize: 14, lineHeight: 22 },
+  deviceHandoffNote: {
+    borderWidth: 1,
+    borderRadius: radii.md,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  deviceHandoffText: {
+    flex: 1,
+    fontFamily: typography.family,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
   appliedCode: { borderWidth: 1, borderRadius: radii.lg, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14 },
   appliedCodeCopy: { flex: 1, minWidth: 0 },
   codeLabel: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1 },
@@ -435,6 +533,7 @@ const styles = StyleSheet.create({
   lockIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   arrivalOrbit: { alignItems: 'center', justifyContent: 'center' },
   formCard: { borderWidth: 1, borderRadius: radii.xl, padding: 26, gap: 20, shadowColor: '#2B1C4C', shadowOpacity: 0.06, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 3 },
+  formStage: { gap: 20 },
   stepHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 18 },
   stepEyebrow: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05 },
   stepLabel: { marginTop: 2, fontFamily: typography.family, fontSize: 13, lineHeight: 18, fontWeight: '600' },
@@ -450,7 +549,8 @@ const styles = StyleSheet.create({
   fields: { gap: 17 },
   fieldGroup: { gap: 7 },
   label: { fontFamily: typography.family, fontSize: 14, lineHeight: 19, fontWeight: '700' },
-  input: { minHeight: 54, borderRadius: radii.md, borderWidth: 1, paddingHorizontal: 15, fontFamily: typography.family, fontSize: 16 },
+  inputFrame: { minHeight: 54, borderRadius: radii.md },
+  input: { minHeight: 52, borderRadius: radii.md, borderWidth: 0, paddingHorizontal: 15, fontFamily: typography.family, fontSize: 16 },
   fieldError: { fontFamily: typography.family, fontSize: 12, lineHeight: 18, fontWeight: '600' },
   errorSlot: { minHeight: 18 },
   lockedInput: { minHeight: 54, borderRadius: radii.md, borderWidth: 1, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

@@ -173,6 +173,7 @@ export const motion = {
   feedback: 220,
   route: 320,
   reveal: 360,
+  journey: 400,
   stagger: 44,
   easeOut: Easing.bezier(0.16, 1, 0.3, 1),
   nativeDriver: Platform.OS !== 'web',

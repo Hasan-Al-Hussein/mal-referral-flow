@@ -11,7 +11,6 @@ import { EventLedger } from '../components/EventLedger';
 import { ReferralOrbit } from '../components/ReferralOrbit';
 import { ScreenShell } from '../components/ScreenShell';
 import { StatusBanner } from '../components/StatusBanner';
-import { REQUIRED_REFERRAL_EVENTS } from '../domain/analytics';
 import { AnimatedReveal } from '../motion/AnimatedReveal';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
@@ -33,8 +32,8 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
     committed: boolean;
     message: string;
   } | null>(null);
-  const completedSteps = useMemo(
-    () => getAcceptedReferralMilestones(events, referralCode, referralFingerprint).size,
+  const activeMilestones = useMemo(
+    () => getAcceptedReferralMilestones(events, referralCode, referralFingerprint),
     [events, referralCode, referralFingerprint],
   );
 
@@ -77,9 +76,9 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
                 style={[styles.successCard, { borderColor: colors.border }]}
               >
                 <ReferralOrbit
-                  activeSteps={completedSteps}
+                  activeMilestones={activeMilestones}
                   size={compact ? 200 : 238}
-                  success={completedSteps === REQUIRED_REFERRAL_EVENTS.length}
+                  success={activeMilestones.has('referral_signup_completed')}
                 />
                 <AnimatedReveal delay={motion.stagger}>
                   <View style={[styles.completePill, { backgroundColor: colors.successSoft }]}>
@@ -88,10 +87,10 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
                   </View>
                 </AnimatedReveal>
                 <AnimatedReveal delay={motion.stagger * 2}>
-                  <Text accessibilityRole="header" style={[styles.title, compact && styles.titleCompact, { color: colors.ink }]}>The referral loop is complete.</Text>
+                  <Text accessibilityRole="header" style={[styles.title, compact && styles.titleCompact, { color: colors.ink }]}>The referred signup is complete.</Text>
                 </AnimatedReveal>
                 <AnimatedReveal delay={motion.stagger * 3}>
-                  <Text style={[styles.description, { color: colors.inkMuted }]}>The signup completed with the same protected referral identity that arrived on the original link.</Text>
+                  <Text style={[styles.description, { color: colors.inkMuted }]}>The invitee-side journey completed with the same protected referral identity that arrived on the original link.</Text>
                 </AnimatedReveal>
 
                 <View style={[styles.receipt, { backgroundColor: colors.surfaceGlass, borderColor: colors.borderStrong }]}>

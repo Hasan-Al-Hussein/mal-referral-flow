@@ -1,249 +1,475 @@
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useMemo, useState } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 
 import { useReducedMotion } from '../motion/MotionProvider';
-import { motion, useAppTheme } from '../theme/theme';
+import { motion, typography, useAppTheme } from '../theme/theme';
+
+import {
+  getReferralOrbitState,
+  REFERRAL_ORBIT_MILESTONES,
+} from './referralOrbitState';
+
+import type { RequiredReferralEventName } from '../domain/analytics';
 
 interface ReferralOrbitProps {
-  activeSteps: number;
+  activeMilestones: ReadonlySet<RequiredReferralEventName>;
   size?: number;
+  status?: 'default' | 'attention' | 'rejected';
   success?: boolean;
 }
 
-const STEP_COUNT = 5;
+const STAGE_ICONS: readonly (keyof typeof Feather.glyphMap)[] = [
+  'link',
+  'send',
+  'mouse-pointer',
+  'user-plus',
+  'shield',
+];
+const JOURNEY_STAGES = REFERRAL_ORBIT_MILESTONES.map((stage, index) => ({
+  ...stage,
+  icon: STAGE_ICONS[index]!,
+}));
+const STEP_COUNT = JOURNEY_STAGES.length;
 
 export function ReferralOrbit({
-  activeSteps,
+  activeMilestones,
   size = 240,
+  status = 'default',
   success = false,
 }: ReferralOrbitProps): React.JSX.Element {
   const { colors } = useAppTheme();
   const reducedMotion = useReducedMotion();
-  const [progress] = useState(() => new Animated.Value(reducedMotion ? activeSteps : 0));
+  const {
+    acceptedStages,
+    carrierTarget,
+    completedCount,
+    currentLabel,
+    latestActiveIndex,
+    milestoneKey,
+  } = getReferralOrbitState(activeMilestones);
+  const [progress] = useState(
+    () => new Animated.Value(reducedMotion ? carrierTarget : 0),
+  );
+  const [nodeProgress] = useState(() =>
+    JOURNEY_STAGES.map(
+      (_, index) => new Animated.Value(reducedMotion && acceptedStages[index] ? 1 : 0),
+    ),
+  );
   const [entry] = useState(() => new Animated.Value(reducedMotion ? 1 : 0));
-  const nodeSize = Math.max(12, size * 0.066);
-  const orbitRadius = size * 0.43;
+  const nodeSize = Math.max(28, size * 0.112);
+  const carrierSize = nodeSize + 8;
+  const orbitRadius = size * 0.38;
   const center = size / 2;
+  const compact = size < 200;
 
   const nodes = useMemo(
     () =>
       Array.from({ length: STEP_COUNT }, (_, index) => {
         const angle = -90 + index * (360 / STEP_COUNT);
         const radians = (angle * Math.PI) / 180;
+        const x = center + Math.cos(radians) * orbitRadius;
+        const y = center + Math.sin(radians) * orbitRadius;
         return {
           angle,
-          left: center + Math.cos(radians) * orbitRadius - nodeSize / 2,
-          top: center + Math.sin(radians) * orbitRadius - nodeSize / 2,
+          x,
+          y,
+          left: x - nodeSize / 2,
+          top: y - nodeSize / 2,
         };
       }),
     [center, nodeSize, orbitRadius],
   );
 
   const segments = useMemo(
-    () => {
-      const segmentColors = [colors.brandPink, colors.brandLilac, colors.brandBlue];
-      return Array.from({ length: 12 }, (_, index) => {
-        const angle = index * 30;
-        const radians = (angle * Math.PI) / 180;
-        const radius = size * 0.27;
-        const segmentWidth = size * 0.085;
-        const segmentHeight = Math.max(5, size * 0.026);
+    () =>
+      nodes.map((node) => {
+        const previous = { x: center, y: center };
+        const deltaX = node.x - previous.x;
+        const deltaY = node.y - previous.y;
+        const length = Math.sqrt(deltaX ** 2 + deltaY ** 2);
         return {
-          angle,
-          color: segmentColors[index % segmentColors.length],
-          width: segmentWidth,
-          height: segmentHeight,
-          left: center + Math.cos(radians) * radius - segmentWidth / 2,
-          top: center + Math.sin(radians) * radius - segmentHeight / 2,
+          angle: (Math.atan2(deltaY, deltaX) * 180) / Math.PI,
+          left: (previous.x + node.x) / 2 - length / 2,
+          length,
+          top: (previous.y + node.y) / 2 - 1.5,
         };
-      });
-    },
-    [center, colors.brandBlue, colors.brandLilac, colors.brandPink, size],
+      }),
+    [center, nodes],
   );
 
   useEffect(() => {
     progress.stopAnimation();
     if (reducedMotion) {
-      progress.setValue(activeSteps);
+      progress.setValue(carrierTarget);
+      return;
+    }
+    const animation = Animated.timing(progress, {
+      toValue: carrierTarget,
+      duration: motion.journey,
+      easing: motion.easeOut,
+      useNativeDriver: motion.nativeDriver,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [carrierTarget, progress, reducedMotion]);
+
+  useEffect(() => {
+    const animations = nodeProgress.map((value, index) => {
+      const accepted = milestoneKey[index] === '1';
+      value.stopAnimation();
+      if (reducedMotion) {
+        value.setValue(accepted ? 1 : 0);
+        return null;
+      }
+      return Animated.timing(value, {
+        toValue: accepted ? 1 : 0,
+        duration: motion.feedback,
+        delay: accepted ? index * 28 : 0,
+        easing: motion.easeOut,
+        useNativeDriver: motion.nativeDriver,
+      });
+    });
+    const activeAnimations = animations.filter((animation) => animation !== null);
+    const group = Animated.parallel(activeAnimations);
+    group.start();
+    return () => {
+      group.stop();
+      nodeProgress.forEach((value) => value.stopAnimation());
+    };
+  }, [milestoneKey, nodeProgress, reducedMotion]);
+
+  useEffect(() => {
+    entry.stopAnimation();
+    if (reducedMotion) {
       entry.setValue(1);
       return;
     }
-    const enterAnimation = Animated.timing(entry, {
+    entry.setValue(0);
+    const animation = Animated.spring(entry, {
       toValue: 1,
-      duration: motion.route,
-      easing: motion.easeOut,
+      damping: 19,
+      stiffness: 210,
+      mass: 0.72,
       useNativeDriver: motion.nativeDriver,
     });
-    const progressAnimation = Animated.timing(progress, {
-      toValue: activeSteps,
-      duration: Math.min(480, Math.max(motion.feedback, activeSteps * 110)),
-      easing: motion.easeOut,
-      useNativeDriver: motion.nativeDriver,
-    });
-    Animated.parallel([enterAnimation, progressAnimation]).start();
-    return () => {
-      enterAnimation.stop();
-      progressAnimation.stop();
-    };
-  }, [activeSteps, entry, progress, reducedMotion]);
+    animation.start();
+    return () => animation.stop();
+  }, [entry, reducedMotion, status]);
 
-  const entryScale = entry.interpolate({ inputRange: [0, 1], outputRange: [0.88, 1] });
+  const hasAttention = status === 'attention' || status === 'rejected';
+  const stateLabel = status === 'rejected'
+    ? 'Rejected'
+    : status === 'attention'
+      ? 'Check details'
+      : success
+        ? 'Verified'
+        : currentLabel;
+  const stateColor = hasAttention ? colors.danger : colors.accent;
+  const stateSoft = hasAttention ? colors.dangerSoft : colors.accentSoft;
+  const entryScale = entry.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] });
   const haloScale = progress.interpolate({
     inputRange: [0, STEP_COUNT],
-    outputRange: [0.86, success ? 1.16 : 1.02],
+    outputRange: [0.82, success ? 1.12 : 1],
     extrapolate: 'clamp',
   });
-  const haloOpacity = progress.interpolate({
-    inputRange: [0, STEP_COUNT],
-    outputRange: [0.18, success ? 0.5 : 0.28],
+  const carrierInputRange = [0, 1, 2, 3, 4, 5];
+  const carrierX = progress.interpolate({
+    inputRange: carrierInputRange,
+    outputRange: [nodes[0]!.x, ...nodes.map((node) => node.x)],
+    extrapolate: 'clamp',
+  });
+  const carrierY = progress.interpolate({
+    inputRange: carrierInputRange,
+    outputRange: [nodes[0]!.y, ...nodes.map((node) => node.y)],
     extrapolate: 'clamp',
   });
 
   return (
     <Animated.View
       accessibilityRole="image"
-      accessibilityLabel={`Referral journey: ${Math.min(activeSteps, STEP_COUNT)} of ${STEP_COUNT} milestones complete`}
-      style={{ width: size, height: size, opacity: entry, transform: [{ scale: entryScale }] }}
+      accessibilityLabel={`Referral journey: ${completedCount} of ${STEP_COUNT} milestones complete. Current state: ${stateLabel}.`}
+      style={[styles.container, { width: size, opacity: entry, transform: [{ scale: entryScale }] }]}
     >
-      <Animated.View
-        style={[
-          styles.halo,
-          {
-            width: size * 0.66,
-            height: size * 0.66,
-            borderRadius: size * 0.33,
-            left: size * 0.17,
-            top: size * 0.17,
-            backgroundColor: colors.brandLilac,
-            opacity: haloOpacity,
-            transform: [{ scale: haloScale }],
-          },
-        ]}
-      />
-      <View
-        style={[
-          styles.orbit,
-          {
-            left: size * 0.06,
-            top: size * 0.06,
-            width: size * 0.88,
-            height: size * 0.88,
-            borderRadius: size * 0.44,
-            borderColor: colors.borderStrong,
-          },
-        ]}
-      />
-
-      {segments.map((segment, index) => (
-        <View
-          key={`segment-${segment.angle}`}
+      <View style={{ width: size, height: size }}>
+        <Animated.View
           style={[
-            styles.segment,
+            styles.halo,
             {
-              width: segment.width,
-              height: segment.height,
-              borderRadius: segment.height / 2,
-              left: segment.left,
-              top: segment.top,
-              backgroundColor: segment.color,
-              opacity: 0.72 + (index % 3) * 0.1,
-              transform: [{ rotate: `${segment.angle + 90}deg` }],
+              width: size * 0.57,
+              height: size * 0.57,
+              borderRadius: size * 0.285,
+              left: size * 0.215,
+              top: size * 0.215,
+              backgroundColor: hasAttention ? colors.danger : colors.brandLilac,
+              opacity: hasAttention ? 0.16 : 0.2,
+              transform: [{ scale: haloScale }],
             },
           ]}
         />
-      ))}
-
-      <LinearGradient
-        colors={[colors.brandPink, colors.brandLilac, colors.brandBlue]}
-        start={{ x: 0.08, y: 0.16 }}
-        end={{ x: 0.92, y: 0.86 }}
-        style={[
-          styles.core,
-          {
-            width: size * 0.34,
-            height: size * 0.34,
-            borderRadius: size * 0.17,
-            left: size * 0.33,
-            top: size * 0.33,
-          },
-        ]}
-      >
         <View
           style={[
-            styles.highlight,
+            styles.orbit,
             {
-              width: size * 0.13,
-              height: size * 0.08,
-              borderRadius: size * 0.07,
-              left: size * 0.055,
-              top: size * 0.04,
+              left: size * 0.08,
+              top: size * 0.08,
+              width: size * 0.84,
+              height: size * 0.84,
+              borderRadius: size * 0.42,
+              borderColor: colors.borderStrong,
             },
           ]}
         />
-        <Feather name={success ? 'check' : 'share-2'} size={size * 0.11} color={colors.white} />
-      </LinearGradient>
 
-      {nodes.map((node, index) => {
-        const completed = activeSteps > index;
-        const nodeProgress = progress.interpolate({
-          inputRange: [index, index + 1],
-          outputRange: [0, 1],
-          extrapolate: 'clamp',
-        });
-        const scale = nodeProgress.interpolate({ inputRange: [0, 1], outputRange: [0.72, 1] });
-        return (
-          <Animated.View
-            key={`node-${node.angle}`}
+        {segments.map((segment, index) => {
+          const segmentProgress = nodeProgress[index]!;
+          return (
+            <View
+              key={`segment-${index}`}
+              style={[
+                styles.segmentBase,
+                {
+                  left: segment.left,
+                  top: segment.top,
+                  width: segment.length,
+                  backgroundColor: colors.border,
+                  transform: [{ rotate: `${segment.angle}deg` }],
+                },
+              ]}
+            >
+              <Animated.View
+                style={[
+                  StyleSheet.absoluteFill,
+                  styles.segmentFill,
+                  {
+                    backgroundColor: colors.accent,
+                    opacity: segmentProgress,
+                    transform: [{ scaleX: segmentProgress }],
+                  },
+                ]}
+              />
+            </View>
+          );
+        })}
+
+        <View
+          style={[
+            styles.coreFrame,
+            {
+              width: size * 0.4,
+              height: size * 0.4,
+              borderRadius: size * 0.2,
+              left: size * 0.3,
+              top: size * 0.3,
+              backgroundColor: stateSoft,
+              borderColor: stateColor,
+            },
+          ]}
+        >
+          <LinearGradient
+            colors={
+              hasAttention
+                ? [colors.danger, colors.danger]
+                : [colors.brandLilac, colors.accent, colors.brandBlue]
+            }
+            start={{ x: 0.05, y: 0.1 }}
+            end={{ x: 0.95, y: 0.9 }}
             style={[
-              styles.node,
+              styles.core,
               {
-                width: nodeSize,
-                height: nodeSize,
-                borderRadius: nodeSize / 2,
-                left: node.left,
-                top: node.top,
-                backgroundColor: completed ? colors.accent : colors.surfaceElevated,
-                borderColor: completed ? colors.white : colors.borderStrong,
-                opacity: nodeProgress.interpolate({ inputRange: [0, 1], outputRange: [0.58, 1] }),
-                transform: [{ scale }],
+                width: size * 0.34,
+                height: size * 0.34,
+                borderRadius: size * 0.17,
               },
             ]}
           >
-            {completed ? <Feather name="check" size={nodeSize * 0.58} color={colors.white} /> : null}
-          </Animated.View>
-        );
-      })}
+            <Feather
+              name={status === 'rejected' ? 'shield-off' : status === 'attention' ? 'alert-circle' : success ? 'check' : 'send'}
+              size={compact ? 15 : 18}
+              color={colors.white}
+            />
+            <Text style={[styles.coreCount, compact && styles.coreCountCompact, { color: colors.white }]}>
+              {completedCount}/5
+            </Text>
+            <Text numberOfLines={1} style={[styles.coreLabel, compact && styles.coreLabelCompact, { color: colors.white }]}>
+              {stateLabel.toUpperCase()}
+            </Text>
+          </LinearGradient>
+        </View>
+
+        {nodes.map((node, index) => {
+          const stage = JOURNEY_STAGES[index]!;
+          const stageProgress = nodeProgress[index]!;
+          return (
+            <View
+              key={stage.label}
+              style={[
+                styles.node,
+                {
+                  width: nodeSize,
+                  height: nodeSize,
+                  borderRadius: nodeSize / 2,
+                  left: node.left,
+                  top: node.top,
+                  backgroundColor: colors.surfaceElevated,
+                  borderColor: colors.borderStrong,
+                },
+              ]}
+            >
+              <Feather name={stage.icon} color={colors.inkSubtle} size={nodeSize * 0.43} />
+              <Animated.View
+                style={[
+                  StyleSheet.absoluteFill,
+                  styles.nodeComplete,
+                  {
+                    borderRadius: nodeSize / 2,
+                    backgroundColor: colors.accent,
+                    opacity: stageProgress,
+                    transform: [
+                      {
+                        scale: stageProgress.interpolate({
+                          inputRange: [0, 1],
+                          outputRange: [0.72, 1],
+                        }),
+                      },
+                    ],
+                  },
+                ]}
+              >
+                <Feather name={stage.icon} color={colors.white} size={nodeSize * 0.43} />
+              </Animated.View>
+            </View>
+          );
+        })}
+
+        <Animated.View
+          style={[
+            styles.carrier,
+            {
+              width: carrierSize,
+              height: carrierSize,
+              borderRadius: carrierSize / 2,
+              left: center - carrierSize / 2,
+              top: center - carrierSize / 2,
+              borderColor: colors.accentStrong,
+              opacity: progress.interpolate({
+                inputRange: [0, 0.18, STEP_COUNT],
+                outputRange: [0, 1, 1],
+                extrapolate: 'clamp',
+              }),
+              transform: [
+                { translateX: Animated.subtract(carrierX, center) },
+                { translateY: Animated.subtract(carrierY, center) },
+              ],
+            },
+          ]}
+        />
+      </View>
+
+      <View
+        accessibilityLabel="Milestones: Create, Share, Click, Start, Verify"
+        style={[styles.stageRail, { width: size }]}
+      >
+        {JOURNEY_STAGES.map((stage, index) => {
+          const complete = acceptedStages[index] ?? false;
+          const current = latestActiveIndex === index;
+          return (
+            <View key={stage.label} style={styles.stageCell}>
+              <View
+                style={[
+                  styles.stageTick,
+                  {
+                    backgroundColor: complete ? colors.accent : colors.border,
+                    opacity: complete ? 1 : 0.75,
+                  },
+                ]}
+              />
+              <Text
+                numberOfLines={1}
+                style={[
+                  styles.stageLabel,
+                  compact && styles.stageLabelCompact,
+                  {
+                    color: complete ? colors.accentStrong : colors.inkSubtle,
+                    fontWeight: current ? '800' : '700',
+                  },
+                ]}
+              >
+                {stage.label.toUpperCase()}
+              </Text>
+            </View>
+          );
+        })}
+      </View>
     </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: { alignItems: 'center' },
   halo: { position: 'absolute' },
   orbit: { position: 'absolute', borderWidth: 1 },
-  segment: { position: 'absolute' },
-  core: {
+  segmentBase: { position: 'absolute', height: 3, borderRadius: 2, overflow: 'hidden' },
+  segmentFill: { borderRadius: 2 },
+  coreFrame: {
     position: 'absolute',
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    overflow: 'hidden',
     shadowColor: '#6E45D8',
-    shadowOpacity: 0.24,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 12 },
-    elevation: 7,
+    shadowOpacity: 0.18,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
   },
-  highlight: { position: 'absolute', backgroundColor: 'rgba(255,255,255,0.48)', transform: [{ rotate: '-22deg' }] },
+  core: { alignItems: 'center', justifyContent: 'center', gap: 1, overflow: 'hidden' },
+  coreCount: {
+    fontFamily: typography.mono,
+    fontSize: 17,
+    lineHeight: 20,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  coreCountCompact: { fontSize: 14, lineHeight: 17 },
+  coreLabel: {
+    maxWidth: '88%',
+    fontFamily: typography.family,
+    fontSize: 7.5,
+    lineHeight: 10,
+    fontWeight: '800',
+    letterSpacing: 0.55,
+  },
+  coreLabelCompact: { fontSize: 6.5, lineHeight: 8, letterSpacing: 0.35 },
   node: {
     position: 'absolute',
-    borderWidth: 2,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#281A4D',
-    shadowOpacity: 0.16,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.13,
+    shadowRadius: 7,
+    shadowOffset: { width: 0, height: 3 },
     elevation: 3,
   },
+  nodeComplete: { alignItems: 'center', justifyContent: 'center' },
+  carrier: {
+    position: 'absolute',
+    borderWidth: 2,
+    shadowColor: '#7032FF',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 8,
+  },
+  stageRail: { flexDirection: 'row', gap: 4, marginTop: 5 },
+  stageCell: { flex: 1, minWidth: 0, alignItems: 'center', gap: 5 },
+  stageTick: { width: '100%', height: 3, borderRadius: 2 },
+  stageLabel: {
+    fontFamily: typography.family,
+    fontSize: 8.5,
+    lineHeight: 11,
+    letterSpacing: 0.45,
+  },
+  stageLabelCompact: { fontSize: 7, lineHeight: 9, letterSpacing: 0.2 },
 });

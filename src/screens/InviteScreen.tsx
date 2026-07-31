@@ -25,11 +25,17 @@ import { useReducedMotion } from '../motion/MotionProvider';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 import type { GeneratedReferral } from '../application/ReferralCoordinator';
+import type { RequiredReferralEventName } from '../domain/analytics';
 import type { RootStackParamList } from '../navigation/types';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Invite'>;
-type Notice = { tone: 'info' | 'success' | 'error'; title: string; message: string };
+type Notice = {
+  tone: 'info' | 'success' | 'error';
+  title: string;
+  message: string;
+  journeyStatus?: 'rejected';
+};
 
 const MOCK_USER = { id: 'member_0194', name: 'Hasan', initials: 'HA' };
 const REVIEW_CODE = 'MAL-H7K9P2Q4';
@@ -50,9 +56,9 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
   const [chevronProgress] = useState(() => new Animated.Value(0));
   const [mobileTraceOpen, setMobileTraceOpen] = useState(false);
   const displayCode = referral?.referralCode ?? 'MAL ••••••••';
-  const completedSteps = useMemo(() => {
-    if (!referral) return 0;
-    return getAcceptedReferralMilestones(events, referral.referralCode).size;
+  const activeMilestones = useMemo(() => {
+    if (!referral) return new Set<RequiredReferralEventName>();
+    return getAcceptedReferralMilestones(events, referral.referralCode);
   }, [events, referral]);
   const architectureLabel = useMemo(
     () =>
@@ -87,7 +93,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
       setNotice({
         tone: 'success',
         title: 'Your referral link is ready',
-        message: 'It is unique to this member and the generation milestone was recorded exactly once.',
+        message: 'It is stable for this demo member and the generation milestone was recorded exactly once.',
       });
     } catch (error) {
       setNotice({
@@ -130,6 +136,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
         tone: 'error',
         title: 'Malformed link safely rejected',
         message: 'The app stayed here and emitted explicit resolution-failure events.',
+        journeyStatus: 'rejected',
       });
     }
   };
@@ -147,7 +154,10 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
             title: 'Test state cleared',
             message: 'Attribution, milestone deduplication, and the visible event trace were reset.',
           });
-          navigation.popToTop();
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Invite' }],
+          });
         },
       );
       if (!result.ok) {
@@ -177,7 +187,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
 
         <View style={[styles.columns, !isWide && styles.stacked]}>
           <View style={styles.mainColumn}>
-            <AnimatedReveal delay={motion.stagger * 2}>
+            <AnimatedReveal delay={motion.stagger * 2} distance={18} variant="forward">
               <LinearGradient
                 colors={
                   isDark
@@ -247,7 +257,11 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
                   </View>
 
                   <View style={[styles.orbitStage, !heroWide && styles.orbitStageCompact]}>
-                    <ReferralOrbit activeSteps={completedSteps} size={heroWide ? 270 : 218} />
+                    <ReferralOrbit
+                      activeMilestones={activeMilestones}
+                      size={heroWide ? 270 : 218}
+                      status={notice?.journeyStatus ?? 'default'}
+                    />
                     <Text style={[styles.orbitCaption, { color: colors.inkMuted }]}>Five milestones. One durable referral identity.</Text>
                   </View>
                 </View>
@@ -315,19 +329,29 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
               </MotionPressable>
 
               {labOpen ? (
-                <AnimatedReveal duration={motion.feedback} distance={8}>
+                <AnimatedReveal duration={motion.feedback} distance={12} variant="forward">
                   <View style={[styles.labBody, { borderTopColor: colors.border }]}>
                     {coordinator.integrationMode === 'web-demo' ? (
                       <StatusBanner
                         tone="info"
-                        title="Credential-free reviewer build"
-                        message="These controls exercise the production parser and state machine. Native Branch install attribution and Firebase delivery require the documented custom build."
+                        title="Reviewer fixture — no app-store install"
+                        message="These controls exercise the parser and state machine locally. Native Branch install attribution and Firebase delivery require the documented custom build."
                       />
                     ) : null}
-                    <Text style={[styles.labDescription, { color: colors.inkMuted }]}>Direct and deferred controls inject Branch-shaped payloads. The deferred path represents the callback received on first launch after installation.</Text>
+                    <Text style={[styles.labDescription, { color: colors.inkMuted }]}>
+                      {coordinator.integrationMode === 'web-demo'
+                        ? 'Direct and deferred controls inject Branch-shaped reviewer fixtures. The deferred option simulates the callback shape only; it does not perform an install.'
+                        : 'Direct and deferred controls use the same link parser. The deferred path represents the callback received on first launch after installation.'}
+                    </Text>
                     <View style={styles.labButtons}>
                       <Button label="Direct open" icon="corner-down-right" variant="secondary" disabled={isGenerating || isSharing || isResetting} onPress={() => simulate('direct')} />
-                      <Button label="Deferred first launch" icon="download-cloud" variant="secondary" disabled={isGenerating || isSharing || isResetting} onPress={() => simulate('deferred')} />
+                      <Button
+                        label={coordinator.integrationMode === 'web-demo' ? 'Simulate deferred callback' : 'Deferred first launch'}
+                        icon="download-cloud"
+                        variant="secondary"
+                        disabled={isGenerating || isSharing || isResetting}
+                        onPress={() => simulate('deferred')}
+                      />
                       <Button label="Invalid payload" icon="shield-off" variant="danger" disabled={isGenerating || isSharing || isResetting} onPress={() => simulate('invalid')} />
                     </View>
                     <View style={[styles.techRow, { borderTopColor: colors.border }]}>
@@ -351,7 +375,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
                     onPress={() => setMobileTraceOpen((current) => !current)}
                 />
                 {mobileTraceOpen ? (
-                  <AnimatedReveal duration={motion.feedback} distance={8}>
+                  <AnimatedReveal duration={motion.feedback} distance={12} variant="forward">
                     <EventLedger referralCode={referral?.referralCode ?? null} />
                   </AnimatedReveal>
                 ) : null}

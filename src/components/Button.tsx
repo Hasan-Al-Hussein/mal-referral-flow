@@ -1,5 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -13,7 +14,7 @@ import {
 
 import { MotionPressable } from '../motion/MotionPressable';
 import { useReducedMotion } from '../motion/MotionProvider';
-import { radii, typography, useAppTheme } from '../theme/theme';
+import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 interface ButtonProps {
   label: string;
@@ -42,6 +43,7 @@ export function Button({
 }: ButtonProps): React.JSX.Element {
   const { colors } = useAppTheme();
   const reducedMotion = useReducedMotion();
+  const [pressPulse] = useState(() => new Animated.Value(0));
   const isPrimary = variant === 'primary';
   const isDanger = variant === 'danger';
   const inactive = disabled || loading;
@@ -60,6 +62,25 @@ export function Button({
         ? colors.ink
         : colors.inkMuted;
 
+  useEffect(
+    () => () => {
+      pressPulse.stopAnimation();
+    },
+    [pressPulse],
+  );
+
+  const triggerPressResponse = () => {
+    pressPulse.stopAnimation();
+    pressPulse.setValue(0);
+    if (reducedMotion) return;
+    Animated.timing(pressPulse, {
+      toValue: 1,
+      duration: motion.feedback,
+      easing: motion.easeOut,
+      useNativeDriver: motion.nativeDriver,
+    }).start();
+  };
+
   return (
     <MotionPressable
       accessibilityRole="button"
@@ -67,7 +88,11 @@ export function Button({
       accessibilityHint={accessibilityHint}
       accessibilityState={{ ...accessibilityState, disabled: inactive, busy: loading }}
       aria-expanded={accessibilityState?.expanded}
-      android_ripple={isPrimary ? { color: 'rgba(255,255,255,0.18)' } : undefined}
+      android_ripple={{
+        color: isPrimary
+          ? 'rgba(255,255,255,0.18)'
+          : `${isDanger ? colors.danger : colors.accent}18`,
+      }}
       borderRadius={radii.pill}
       disabled={inactive}
       focusColor={colors.accent}
@@ -75,6 +100,7 @@ export function Button({
       glowColor={isPrimary ? colors.accent : undefined}
       hoverTint={isDanger ? colors.danger : isPrimary ? colors.white : colors.accent}
       onPress={onPress}
+      onPressIn={triggerPressResponse}
       preset="button"
       transformOnEngagement={variant === 'primary' || variant === 'secondary'}
       contentStyle={({ pressed }) => [
@@ -127,6 +153,29 @@ export function Button({
             ]}
           />
         ) : null}
+        {isPrimary ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.shine,
+              {
+                opacity: pressPulse.interpolate({
+                  inputRange: [0, 0.45, 1],
+                  outputRange: [0, 0.34, 0],
+                }),
+                transform: [
+                  { rotate: '18deg' },
+                  {
+                    translateX: pressPulse.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-90, 280],
+                    }),
+                  },
+                ],
+              },
+            ]}
+          />
+        ) : null}
         <View style={[styles.content, loading && styles.loadingContent]}>
           {icon ? (
             <Animated.View
@@ -135,7 +184,15 @@ export function Button({
                   {
                     scale: reducedMotion
                       ? 1
-                      : engagement.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }),
+                          : engagement.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }),
+                  },
+                  {
+                    translateX: reducedMotion
+                      ? 0
+                      : pressPulse.interpolate({
+                          inputRange: [0, 0.55, 1],
+                          outputRange: [0, 2, 0],
+                        }),
                   },
                 ],
               }}

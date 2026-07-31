@@ -11,7 +11,7 @@ interface AnimatedRevealProps extends PropsWithChildren {
   duration?: number;
   replayKey?: string | number | boolean;
   style?: StyleProp<ViewStyle>;
-  variant?: 'rise' | 'scale' | 'fade';
+  variant?: 'rise' | 'scale' | 'fade' | 'forward' | 'backward';
 }
 
 export function AnimatedReveal({
@@ -63,6 +63,15 @@ export function AnimatedReveal({
               }),
             },
           ]
+        : variant === 'forward' || variant === 'backward'
+          ? [
+              {
+                translateX: progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [variant === 'forward' ? distance : -distance, 0],
+                }),
+              },
+            ]
         : undefined;
 
   return (

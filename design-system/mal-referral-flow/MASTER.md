@@ -4,7 +4,7 @@ This file is the visual source of truth for the assessment prototype. It combine
 
 ## Product thesis
 
-**Mal Trust Loop:** a calm, premium referral journey that makes attribution feel continuous and protected. The customer experience leads; reviewer controls and telemetry remain available as secondary evidence.
+**Mal Trust Loop:** a calm, premium referral journey that makes attribution feel continuous and protected. The customer experience leads; reviewer controls and a precisely labeled local event trace remain available as secondary evidence.
 
 ## Brand foundations
 
@@ -46,7 +46,7 @@ Primary CTA gradient: `#5222C8 → #2858B9` in light mode and `#633ED6 → #2854
 
 ## Signature detail
 
-The **referral orbit** uses five nodes mapped to the five required funnel events. A segmented inner rosette references Mal's emblem without replacing or modifying the official lockup. Nodes illuminate only when the corresponding analytics milestone is accepted.
+The **referral orbit** uses five nodes mapped to the five required funnel events. A segmented inner rosette references Mal's emblem without replacing or modifying the official lockup. An identity carrier lands on the latest accepted milestone while radial spokes and labels illuminate from the actual accepted event set. The UI never infers prefix events from a count: a standalone deferred callback is `1/5 · Click`, with Create and Share left inactive because those occur on the referrer's device.
 
 ## Motion
 
@@ -57,10 +57,10 @@ The **referral orbit** uses five nodes mapped to the five required funnel events
 - Status feedback: 220ms opacity + translateY up to 8px.
 - Route/content reveal: 320–360ms opacity + translateY up to 12px.
 - Stagger: 44ms between related items.
-- State transitions: READY, accordion expansion, signup progress, validation, and telemetry counters animate only when their underlying state changes.
+- State transitions: READY, accordion expansion, signup progress, validation, and local-trace counters animate only when their underlying state changes.
 - Success/orbit sequence: finite, state-driven, transform/opacity only.
 - Easing: `Bezier(0.16, 1, 0.3, 1)`.
-- Static hero, arrival, link, telemetry, form, and receipt surfaces never lift on hover because they are not actions.
+- Static hero, arrival, link, trace, form, and receipt surfaces never lift on hover because they are not actions.
 - No looping decoration, confetti, pointer-following parallax, or animation-triggered business logic.
 - Reduced motion: content appears immediately and navigation animation is disabled.
 
@@ -69,7 +69,7 @@ The **referral orbit** uses five nodes mapped to the five required funnel events
 1. Customer job and primary CTA.
 2. Referral identity and reassurance.
 3. Status feedback.
-4. Reviewer controls and analytics trace.
+4. Reviewer controls and local event trace on web; analytics trace in configured native builds.
 
 On phones, technical evidence is collapsed behind a labeled control. On desktop, it becomes a lower-emphasis side rail.
 

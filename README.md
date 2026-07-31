@@ -32,7 +32,7 @@ The credential-free web path requires no sign-in, Branch account, Firebase proje
 3. Select **Share my invitation**. A supported browser opens Web Share; otherwise the full invite is copied. The ledger records the actual outcome rather than assuming success.
 4. Select **Direct open**. The Branch-shaped payload passes through the production parser and coordinator, then opens onboarding with the referral code visible and locked.
 5. Enter a name and email, then select **Create demo account**. The persisted attribution identity is frozen when signup starts and completion is emitted only after the mock endpoint accepts it.
-6. Select **Run the flow again**. The app clears persisted and visible journey state, remounts a fresh Invite screen at `0/5`, and restores **Generate my referral link**. Generate, share, then try **Deferred first launch**; onboarding should open at `3/5`, use the same ingestion path with `+is_first_session=true`, and identify the source as `demo-deferred`.
+6. Select **Run the flow again**. The app clears persisted and visible journey state, remounts a fresh Invite screen at `0/5`, and restores **Generate my referral link**. Generate, share, then select **Deferred first launch**; onboarding should open at `3/5` and completion should reach `5/5` for that combined reviewer journey. To inspect the invitee device in isolation, reset once more and select **Deferred first launch** without generating or sharing first; onboarding truthfully begins at `1/5 · Click` because the first two milestones occurred on the referrer's device. Both paths use `+is_first_session=true` and are labeled `demo-deferred`.
 7. Select **Invalid payload** to verify safe rejection and the failure events without unintended navigation.
 
 Useful edge-case checks:
@@ -89,9 +89,9 @@ Useful edge-case checks:
 
 The interface is a brand-inspired assessment prototype, not a claim to be Mal's production UI. It uses the supplied Mal lockup and the public product's pale-blue, charcoal, violet, lilac, and cyan visual language while keeping the referral task—not the engineering controls—as the primary experience.
 
-The signature **Mal Trust Loop** is a five-node orbit mapped directly to the required funnel events. Each node advances only after an accepted milestone, so the visual centerpiece is also a truthful system-state indicator. Technical telemetry remains visible for reviewers on wide screens and collapses behind an explicit control on phones.
+The signature **Mal Trust Loop** is a five-node orbit mapped directly to the required funnel events. Each node reflects the actual accepted event name rather than inferring a prefix from a count, so a standalone deferred callback correctly illuminates only Click at `1/5`. The local event trace remains visible for reviewers on wide screens and collapses behind an explicit control on phones.
 
-Motion is finite and functional: entry reveals, hover/focus/press feedback, referral-code readiness, reviewer disclosure, signup progress, validation, telemetry changes, link handoff, and completion confirmation. Web controls use a shared 180ms hover language with bounded lift or directional movement, tint, glow, and icon response; primary CTAs add one finite light sweep. Static surfaces remain stable so motion never implies a false action. Animations use opacity and transforms, stop on cleanup, never delay analytics or navigation, and become immediately static when reduced motion is enabled. The light-first interface also includes a deliberate dark theme rather than relying on a generic system inversion.
+Motion is finite and functional: entry reveals, hover/focus/press feedback, referral-code readiness, reviewer disclosure, signup progress, validation, local-trace changes, link handoff, and completion confirmation. Web controls use a shared 180ms hover language with bounded lift or directional movement, tint, glow, and icon response; primary CTAs add one finite light sweep. Static surfaces remain stable so motion never implies a false action. Animations use opacity and transforms, stop on cleanup, never delay analytics or navigation, and become immediately static when reduced motion is enabled. The light-first interface also includes a deliberate dark theme rather than relying on a generic system inversion.
 
 ## Technology choices
 
@@ -436,7 +436,7 @@ npm run build:web
 
 GitHub Actions runs the same checks on pushes to `main` and on pull requests. Native verification remains separate because it requires provider credentials, signing identities, physical devices, and store/install state.
 
-The rendered web reviewer build was also checked at 375 x 812, 812 x 375, and 1440 x 1000 in light and dark themes. The full simulated deferred journey was verified at `3/5` on onboarding and `5/5` on completion, and **Run the flow again** was regression-checked to restore a new Invite route at `0/5` with no stale rendered journey. Reset creates a fresh demo storage epoch, including a newly generated local code; that code is then used consistently by Generate, Share, and the deferred fixture. The reduced-motion path was verified with `prefers-reduced-motion: reduce`; content remains immediately visible and navigation animation is disabled.
+The rendered reviewer build was checked at 375 x 812, 768 x 1024, 812 x 375, 1440 x 1000, and a 720px CSS viewport as a 1440-at-200%-zoom reflow proxy, in light and dark themes. The combined Generate → Share → Deferred path was verified at `3/5` on onboarding and `5/5` on completion. A standalone deferred fixture was separately verified at `1/5 · Click`; signup start and completion advance that invitee-side trace to `3/5 · Verified`. **Run the flow again** was regression-checked to restore a new Invite route at `0/5` without the previous referral code. Reset creates a fresh demo storage epoch, including a newly generated local code. The reduced-motion branches were source-verified for immediate state values and disabled navigation animation; final OS/browser-setting emulation remains a manual device check.
 
 ## Known limitations and proof boundary
 
@@ -465,6 +465,18 @@ The rendered web reviewer build was also checked at 375 x 812, 812 x 375, and 14
 ### Completed five-event funnel
 
 ![All five required referral events completed](docs/screenshots/03-completed-funnel.png)
+
+### Trust Loop motion and state QA
+
+![Generated Trust Loop in light theme](docs/screenshots/04-trust-loop-generated-light.png)
+
+![Standalone deferred reviewer fixture at 1/5 Click](docs/screenshots/05-deferred-click-only-light.png)
+
+![Validation focus and error feedback in dark theme](docs/screenshots/06-validation-dark.png)
+
+![Invitee-side completion at 3/5 Verified in dark theme](docs/screenshots/07-success-dark.png)
+
+![Deferred simulator clarity at 375px](docs/screenshots/08-mobile-375.png)
 
 Native share-sheet and real Branch dashboard evidence are intentionally not shown without a credentialed native build; the exact verification procedure is documented above.
 

@@ -1,6 +1,6 @@
 import { Feather } from '@expo/vector-icons';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, Platform, StyleSheet, Text, View } from 'react-native';
 
 import {
   getAcceptedReferralMilestones,
@@ -48,6 +48,7 @@ interface EventLedgerProps {
 export function EventLedger({ referralCode, referralFingerprint }: EventLedgerProps): React.JSX.Element {
   const { colors } = useAppTheme();
   const reducedMotion = useReducedMotion();
+  const isWebTrace = Platform.OS === 'web';
   const { events } = useReferralRuntime();
   const scopedEvents = scopeReferralEntries(events, referralCode, referralFingerprint);
   const scopedCode = referralCode ?? scopedEvents[0]?.event.properties.referral_code;
@@ -91,7 +92,9 @@ export function EventLedger({ referralCode, referralFingerprint }: EventLedgerPr
         <View style={styles.headingCopy}>
           <View style={styles.liveRow}>
             <View style={[styles.liveDot, { backgroundColor: colors.success }]} />
-            <Text style={[styles.eyebrow, { color: colors.success }]}>LIVE TELEMETRY</Text>
+            <Text style={[styles.eyebrow, { color: colors.success }]}>
+              {isWebTrace ? 'LOCAL EVENT TRACE' : 'LIVE TELEMETRY'}
+            </Text>
           </View>
           <Text style={[styles.title, { color: colors.ink }]}>Referral journey</Text>
         </View>
@@ -99,15 +102,25 @@ export function EventLedger({ referralCode, referralFingerprint }: EventLedgerPr
           <Text style={[styles.counterText, { color: colors.accentStrong }]}>{completedCount}/5</Text>
         </Animated.View>
       </View>
-      <Text style={[styles.description, { color: colors.inkMuted }]}>Invitee milestones are scoped to this exact referral journey.</Text>
+      <Text style={[styles.description, { color: colors.inkMuted }]}>
+        {isWebTrace
+          ? 'Reviewer evidence from the in-browser adapter, scoped to this exact referral journey.'
+          : 'Invitee milestones are scoped to this exact referral journey.'}
+      </Text>
 
-      <View style={[styles.progressTrack, { backgroundColor: colors.surfaceMuted }]}>
-        <View
-          style={[
-            styles.progressFill,
-            { backgroundColor: colors.accent, width: `${completedCount * 20}%` },
-          ]}
-        />
+      <View
+        accessibilityRole="progressbar"
+        accessibilityValue={{ min: 0, max: 5, now: completedCount }}
+        accessibilityLabel={`${completedCount} of 5 referral milestones complete`}
+        style={styles.progressTrack}
+      >
+        {REQUIRED_REFERRAL_EVENTS.map((name, index) => (
+          <LedgerProgressSegment
+            key={name}
+            complete={completedNames.has(name)}
+            index={index}
+          />
+        ))}
       </View>
 
       <View style={styles.funnel}>
@@ -125,7 +138,9 @@ export function EventLedger({ referralCode, referralFingerprint }: EventLedgerPr
       {scopedEvents.length ? (
         <View style={[styles.log, { borderTopColor: colors.border }]}>
           <View style={styles.logHeading}>
-            <Text style={[styles.logHeadingText, { color: colors.ink }]}>Latest delivery</Text>
+            <Text style={[styles.logHeadingText, { color: colors.ink }]}>
+              {isWebTrace ? 'Latest local-adapter delivery' : 'Latest delivery'}
+            </Text>
             <Text style={[styles.logCount, { color: colors.inkSubtle }]}>{scopedEvents.length} events</Text>
           </View>
           {scopedEvents.slice(0, 5).map(({ event, delivery, sequence }) => {
@@ -157,7 +172,12 @@ export function EventLedger({ referralCode, referralFingerprint }: EventLedgerPr
                   </View>
                   <View style={styles.logCopy}>
                     <Text numberOfLines={1} style={[styles.logName, { color: colors.ink }]}>{event.name}</Text>
-                    <Text numberOfLines={2} style={[styles.logMeta, { color: colors.inkSubtle }]}>{event.properties.referral_code} · {event.properties.platform} · {delivery}</Text>
+                    <Text numberOfLines={2} style={[styles.logMeta, { color: colors.inkSubtle }]}>
+                      {event.properties.referral_code} · {event.properties.platform} ·{' '}
+                      {isWebTrace && delivery === 'accepted'
+                        ? 'delivered to local adapter'
+                        : delivery}
+                    </Text>
                   </View>
                 </View>
               </AnimatedReveal>
@@ -171,10 +191,59 @@ export function EventLedger({ referralCode, referralFingerprint }: EventLedgerPr
           </View>
           <View style={styles.emptyCopy}>
             <Text style={[styles.emptyTitle, { color: colors.ink }]}>Waiting for the first milestone</Text>
-            <Text style={[styles.emptyText, { color: colors.inkMuted }]}>Generate a link to start the trace.</Text>
+            <Text style={[styles.emptyText, { color: colors.inkMuted }]}>
+              {isWebTrace
+                ? 'Generate a link to start the local trace.'
+                : 'Generate a link to start the trace.'}
+            </Text>
           </View>
         </View>
       )}
+    </View>
+  );
+}
+
+function LedgerProgressSegment({
+  complete,
+  index,
+}: {
+  complete: boolean;
+  index: number;
+}): React.JSX.Element {
+  const { colors } = useAppTheme();
+  const reducedMotion = useReducedMotion();
+  const [progress] = useState(() => new Animated.Value(reducedMotion && complete ? 1 : 0));
+
+  useEffect(() => {
+    progress.stopAnimation();
+    if (reducedMotion) {
+      progress.setValue(complete ? 1 : 0);
+      return;
+    }
+    const animation = Animated.timing(progress, {
+      toValue: complete ? 1 : 0,
+      delay: complete ? index * 28 : 0,
+      duration: motion.feedback,
+      easing: motion.easeOut,
+      useNativeDriver: motion.nativeDriver,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [complete, index, progress, reducedMotion]);
+
+  return (
+    <View style={[styles.progressSegment, { backgroundColor: colors.surfaceMuted }]}>
+      <Animated.View
+        style={[
+          StyleSheet.absoluteFill,
+          styles.progressSegmentFill,
+          {
+            backgroundColor: colors.accent,
+            opacity: progress,
+            transform: [{ scaleX: progress }],
+          },
+        ]}
+      />
     </View>
   );
 }
@@ -270,8 +339,9 @@ const styles = StyleSheet.create({
   counter: { minWidth: 46, height: 34, borderRadius: 17, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
   counterText: { fontFamily: typography.mono, fontSize: 12, fontWeight: '800' },
   description: { fontFamily: typography.family, fontSize: 13, lineHeight: 20 },
-  progressTrack: { width: '100%', height: 5, borderRadius: 3, overflow: 'hidden' },
-  progressFill: { height: '100%', borderRadius: 3 },
+  progressTrack: { width: '100%', height: 5, flexDirection: 'row', gap: 4 },
+  progressSegment: { flex: 1, height: 5, borderRadius: 3, overflow: 'hidden' },
+  progressSegmentFill: { borderRadius: 3 },
   funnel: { gap: 0 },
   funnelItem: { minHeight: 45, flexDirection: 'row', alignItems: 'stretch', gap: 12 },
   railColumn: { width: 30, alignItems: 'center' },

@@ -60,7 +60,8 @@ function AppNavigator(): React.JSX.Element {
         initialRouteName="Invite"
         screenOptions={{
           headerShown: false,
-          animation: reducedMotion ? 'none' : 'fade_from_bottom',
+          animation: reducedMotion ? 'none' : 'slide_from_right',
+          gestureEnabled: true,
           contentStyle: { backgroundColor: colors.background },
         }}
       >
