@@ -1,0 +1,29 @@
+{
+  "cli": {
+    "version": ">= 18.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "NATIVE_SDK_BUILD": "1"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "NATIVE_SDK_BUILD": "1"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "NATIVE_SDK_BUILD": "1"
+      }
+    }
+  }
+}
