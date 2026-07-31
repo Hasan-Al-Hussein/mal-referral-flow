@@ -1,11 +1,20 @@
 import { Feather } from '@expo/vector-icons';
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Animated, StyleSheet, Text, View } from 'react-native';
 
+import {
+  getAcceptedReferralMilestones,
+  scopeReferralEntries,
+} from '../application/referralProgress';
 import { useReferralRuntime } from '../application/ReferralRuntime';
-import { REQUIRED_REFERRAL_EVENTS, type ReferralEventName } from '../domain/analytics';
-import { radii, useAppTheme } from '../theme/theme';
-
-import { Button } from './Button';
+import {
+  FAILURE_REFERRAL_EVENTS,
+  REQUIRED_REFERRAL_EVENTS,
+  type ReferralEventName,
+} from '../domain/analytics';
+import { AnimatedReveal } from '../motion/AnimatedReveal';
+import { useReducedMotion } from '../motion/MotionProvider';
+import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 const shortLabels: Record<ReferralEventName, string> = {
   referral_link_generated: 'Link generated',
@@ -22,119 +31,235 @@ const shortLabels: Record<ReferralEventName, string> = {
   referral_duplicate_suppressed: 'Duplicate suppressed',
 };
 
-export function EventLedger(): React.JSX.Element {
+const warningEvents = new Set<ReferralEventName>([
+  'referral_link_share_cancelled',
+  'referral_duplicate_suppressed',
+]);
+const failureEvents = new Set<ReferralEventName>(
+  FAILURE_REFERRAL_EVENTS.filter((name) => !warningEvents.has(name)),
+);
+
+interface EventLedgerProps {
+  referralCode?: string | null;
+}
+
+export function EventLedger({ referralCode }: EventLedgerProps): React.JSX.Element {
   const { colors } = useAppTheme();
-  const { events, clearLedger } = useReferralRuntime();
-  const completedNames = new Set(
-    events.filter(({ delivery }) => delivery === 'accepted').map(({ event }) => event.name),
-  );
+  const { events } = useReferralRuntime();
+  const scopedEvents = scopeReferralEntries(events, referralCode);
+  const scopedCode = referralCode ?? scopedEvents[0]?.event.properties.referral_code;
+  const completedNames = scopedCode
+    ? getAcceptedReferralMilestones(scopedEvents, scopedCode)
+    : new Set();
+  const completedCount = REQUIRED_REFERRAL_EVENTS.filter((name) => completedNames.has(name)).length;
 
   return (
-    <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+    <View style={[styles.card, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
       <View style={styles.headingRow}>
-        <View>
-          <Text style={[styles.eyebrow, { color: colors.accentStrong }]}>LIVE CONTRACT</Text>
-          <Text style={[styles.title, { color: colors.ink }]}>Referral event ledger</Text>
+        <View style={styles.headingCopy}>
+          <View style={styles.liveRow}>
+            <View style={[styles.liveDot, { backgroundColor: colors.success }]} />
+            <Text style={[styles.eyebrow, { color: colors.success }]}>LIVE TELEMETRY</Text>
+          </View>
+          <Text style={[styles.title, { color: colors.ink }]}>Referral journey</Text>
         </View>
-        <View style={[styles.counter, { backgroundColor: colors.surfaceMuted }]}>
-          <Text style={[styles.counterText, { color: colors.inkMuted }]}>{events.length}</Text>
+        <View style={[styles.counter, { backgroundColor: colors.accentSoft }]}>
+          <Text style={[styles.counterText, { color: colors.accentStrong }]}>{completedCount}/5</Text>
         </View>
       </View>
-      <Text style={[styles.description, { color: colors.inkMuted }]}>
-        Every event includes referral_code, platform, flow_id and a stable event_id.
-      </Text>
+      <Text style={[styles.description, { color: colors.inkMuted }]}>Every milestone shown here is scoped to one referral code.</Text>
+
+      <View style={[styles.progressTrack, { backgroundColor: colors.surfaceMuted }]}>
+        <View
+          style={[
+            styles.progressFill,
+            { backgroundColor: colors.accent, width: `${completedCount * 20}%` },
+          ]}
+        />
+      </View>
 
       <View style={styles.funnel}>
-        {REQUIRED_REFERRAL_EVENTS.map((name, index) => {
-          const complete = completedNames.has(name);
-          return (
-            <View key={name} style={styles.funnelItem}>
-              <View
-                style={[
-                  styles.check,
-                  { backgroundColor: complete ? colors.successSoft : colors.surfaceMuted },
-                ]}
-              >
-                <Feather
-                  name={complete ? 'check' : 'circle'}
-                  color={complete ? colors.success : colors.inkSubtle}
-                  size={14}
-                />
-              </View>
-              <View style={styles.funnelCopy}>
-                <Text style={[styles.funnelLabel, { color: colors.ink }]}>{shortLabels[name]}</Text>
-                <Text style={[styles.funnelIndex, { color: colors.inkSubtle }]}>0{index + 1}</Text>
-              </View>
-            </View>
-          );
-        })}
+        {REQUIRED_REFERRAL_EVENTS.map((name, index) => (
+          <LedgerMilestone
+            key={name}
+            complete={completedNames.has(name)}
+            index={index}
+            label={shortLabels[name]}
+            last={index === REQUIRED_REFERRAL_EVENTS.length - 1}
+          />
+        ))}
       </View>
 
-      {events.length ? (
+      {scopedEvents.length ? (
         <View style={[styles.log, { borderTopColor: colors.border }]}>
-          {events.slice(0, 5).map(({ event, delivery, sequence }) => {
-            const isFailure = event.name.includes('failed') || event.name.includes('rejected');
+          <View style={styles.logHeading}>
+            <Text style={[styles.logHeadingText, { color: colors.ink }]}>Latest delivery</Text>
+            <Text style={[styles.logCount, { color: colors.inkSubtle }]}>{scopedEvents.length} events</Text>
+          </View>
+          {scopedEvents.slice(0, 5).map(({ event, delivery, sequence }) => {
+            const isWarning = delivery === 'duplicate' || warningEvents.has(event.name);
+            const isFailure = delivery === 'failed' || failureEvents.has(event.name);
+            const eventColor =
+              isFailure ? colors.danger : isWarning ? colors.warning : colors.success;
+            const eventIcon =
+              delivery === 'duplicate'
+                ? 'copy'
+                : isFailure
+                  ? 'alert-circle'
+                  : isWarning
+                    ? 'alert-triangle'
+                    : 'check';
             return (
-              <View key={`${sequence}-${event.properties.event_id}`} style={styles.logRow}>
-                <View
-                  style={[
-                    styles.eventDot,
-                    {
-                      backgroundColor:
-                        delivery === 'duplicate'
-                          ? colors.warning
-                          : isFailure
-                            ? colors.danger
-                            : colors.success,
-                    },
-                  ]}
-                />
-                <View style={styles.logCopy}>
-                  <Text numberOfLines={1} style={[styles.logName, { color: colors.ink }]}>
-                    {event.name}
-                  </Text>
-                  <Text numberOfLines={1} style={[styles.logMeta, { color: colors.inkSubtle }]}>
-                    {event.properties.referral_code} · {event.properties.platform} · {delivery}
-                  </Text>
+              <AnimatedReveal
+                key={`${sequence}-${event.properties.event_id}`}
+                distance={7}
+                duration={motion.feedback}
+              >
+                <View style={styles.logRow}>
+                  <View style={[styles.eventGlyph, { backgroundColor: `${eventColor}18` }]}>
+                    <Feather
+                      name={eventIcon}
+                      color={eventColor}
+                      size={13}
+                    />
+                  </View>
+                  <View style={styles.logCopy}>
+                    <Text numberOfLines={1} style={[styles.logName, { color: colors.ink }]}>{event.name}</Text>
+                    <Text numberOfLines={2} style={[styles.logMeta, { color: colors.inkSubtle }]}>{event.properties.referral_code} · {event.properties.platform} · {delivery}</Text>
+                  </View>
                 </View>
-              </View>
+              </AnimatedReveal>
             );
           })}
         </View>
       ) : (
         <View style={[styles.empty, { backgroundColor: colors.surfaceMuted }]}>
-          <Feather name="activity" color={colors.inkSubtle} size={18} />
-          <Text style={[styles.emptyText, { color: colors.inkMuted }]}>Events will appear here as you test.</Text>
+          <View style={[styles.emptyIcon, { backgroundColor: colors.surfaceElevated }]}>
+            <Feather name="activity" color={colors.accentStrong} size={17} />
+          </View>
+          <View style={styles.emptyCopy}>
+            <Text style={[styles.emptyTitle, { color: colors.ink }]}>Waiting for the first milestone</Text>
+            <Text style={[styles.emptyText, { color: colors.inkMuted }]}>Generate a link to start the trace.</Text>
+          </View>
         </View>
       )}
-      {events.length ? (
-        <Button label="Clear visible log" variant="ghost" onPress={clearLedger} />
-      ) : null}
+    </View>
+  );
+}
+
+function LedgerMilestone({
+  complete,
+  index,
+  label,
+  last,
+}: {
+  complete: boolean;
+  index: number;
+  label: string;
+  last: boolean;
+}): React.JSX.Element {
+  const { colors } = useAppTheme();
+  const reducedMotion = useReducedMotion();
+  const [scale] = useState(() => new Animated.Value(1));
+
+  useEffect(() => {
+    scale.stopAnimation();
+    if (!complete || reducedMotion) {
+      scale.setValue(1);
+      return;
+    }
+    scale.setValue(1);
+    const animation = Animated.sequence([
+      Animated.spring(scale, {
+        toValue: 1.16,
+        damping: 14,
+        stiffness: 260,
+        mass: 0.65,
+        useNativeDriver: motion.nativeDriver,
+      }),
+      Animated.spring(scale, {
+        toValue: 1,
+        damping: 18,
+        stiffness: 240,
+        mass: 0.7,
+        useNativeDriver: motion.nativeDriver,
+      }),
+    ]);
+    animation.start();
+    return () => {
+      animation.stop();
+      scale.setValue(1);
+    };
+  }, [complete, reducedMotion, scale]);
+
+  return (
+    <View style={styles.funnelItem}>
+      <View style={styles.railColumn}>
+        <Animated.View
+          style={[
+            styles.check,
+            {
+              backgroundColor: complete ? colors.accent : colors.surfaceElevated,
+              borderColor: complete ? colors.accent : colors.borderStrong,
+              transform: [{ scale }],
+            },
+          ]}
+        >
+          <Feather name={complete ? 'check' : 'circle'} color={complete ? colors.white : colors.inkSubtle} size={13} />
+        </Animated.View>
+        {!last ? <View style={[styles.rail, { backgroundColor: complete ? colors.accentSoft : colors.border }]} /> : null}
+      </View>
+      <View style={styles.funnelCopy}>
+        <Text style={[styles.funnelLabel, { color: complete ? colors.ink : colors.inkMuted }]}>{label}</Text>
+        <Text style={[styles.funnelIndex, { color: colors.inkSubtle }]}>0{index + 1}</Text>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { borderWidth: 1, borderRadius: radii.lg, padding: 22, gap: 18 },
-  headingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  eyebrow: { fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.2 },
-  title: { marginTop: 3, fontSize: 19, lineHeight: 24, fontWeight: '700' },
-  counter: { minWidth: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  counterText: { fontSize: 12, fontWeight: '800' },
-  description: { fontSize: 13, lineHeight: 19 },
-  funnel: { gap: 10 },
-  funnelItem: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 11 },
-  check: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
-  funnelCopy: { flex: 1, flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
-  funnelLabel: { fontSize: 13, lineHeight: 18, fontWeight: '600' },
-  funnelIndex: { fontSize: 11, lineHeight: 18, fontVariant: ['tabular-nums'] },
-  log: { borderTopWidth: 1, paddingTop: 15, gap: 12 },
+  card: {
+    borderWidth: 1,
+    borderRadius: radii.lg,
+    padding: 22,
+    gap: 18,
+    shadowColor: '#2B1C4C',
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 3,
+  },
+  headingRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 14 },
+  headingCopy: { flex: 1 },
+  liveRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  liveDot: { width: 7, height: 7, borderRadius: 4 },
+  eyebrow: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05 },
+  title: { marginTop: 4, fontFamily: typography.family, fontSize: 21, lineHeight: 27, fontWeight: '700', letterSpacing: -0.35 },
+  counter: { minWidth: 46, height: 34, borderRadius: 17, paddingHorizontal: 10, alignItems: 'center', justifyContent: 'center' },
+  counterText: { fontFamily: typography.mono, fontSize: 12, fontWeight: '800' },
+  description: { fontFamily: typography.family, fontSize: 13, lineHeight: 20 },
+  progressTrack: { width: '100%', height: 5, borderRadius: 3, overflow: 'hidden' },
+  progressFill: { height: '100%', borderRadius: 3 },
+  funnel: { gap: 0 },
+  funnelItem: { minHeight: 45, flexDirection: 'row', alignItems: 'stretch', gap: 12 },
+  railColumn: { width: 30, alignItems: 'center' },
+  check: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  rail: { flex: 1, width: 2, minHeight: 15, marginVertical: 2 },
+  funnelCopy: { flex: 1, minHeight: 30, paddingTop: 5, flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
+  funnelLabel: { flex: 1, fontFamily: typography.family, fontSize: 13, lineHeight: 19, fontWeight: '600' },
+  funnelIndex: { fontFamily: typography.mono, fontSize: 11, lineHeight: 19, fontVariant: ['tabular-nums'] },
+  log: { borderTopWidth: 1, paddingTop: 16, gap: 12 },
+  logHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  logHeadingText: { fontFamily: typography.family, fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  logCount: { fontFamily: typography.family, fontSize: 11, lineHeight: 16, fontWeight: '600' },
   logRow: { flexDirection: 'row', gap: 10, alignItems: 'flex-start' },
-  eventDot: { width: 7, height: 7, borderRadius: 4, marginTop: 6 },
+  eventGlyph: { width: 28, height: 28, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   logCopy: { flex: 1 },
-  logName: { fontSize: 12, lineHeight: 17, fontWeight: '600' },
-  logMeta: { marginTop: 1, fontSize: 10, lineHeight: 14 },
-  empty: { padding: 16, borderRadius: radii.md, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  emptyText: { flex: 1, fontSize: 12, lineHeight: 17 },
-  indicator: { width: 0 },
+  logName: { fontFamily: typography.mono, fontSize: 11, lineHeight: 16, fontWeight: '600' },
+  logMeta: { marginTop: 2, fontFamily: typography.family, fontSize: 11, lineHeight: 16 },
+  empty: { padding: 15, borderRadius: radii.md, flexDirection: 'row', alignItems: 'center', gap: 11 },
+  emptyIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  emptyCopy: { flex: 1 },
+  emptyTitle: { fontFamily: typography.family, fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  emptyText: { marginTop: 2, fontFamily: typography.family, fontSize: 12, lineHeight: 18 },
 });

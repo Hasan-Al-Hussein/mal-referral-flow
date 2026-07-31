@@ -1,74 +1,136 @@
-import { useColorScheme } from 'react-native';
+import {
+  createContext,
+  createElement,
+  type PropsWithChildren,
+  useContext,
+  useMemo,
+  useState,
+} from 'react';
+import { Easing, Platform } from 'react-native';
+
+export type ThemeMode = 'light' | 'dark';
 
 export interface AppTheme {
   isDark: boolean;
+  mode: ThemeMode;
+  toggleTheme(): void;
   colors: {
     background: string;
     surface: string;
     surfaceElevated: string;
     surfaceMuted: string;
+    surfaceGlass: string;
     ink: string;
     inkMuted: string;
     inkSubtle: string;
     border: string;
+    borderStrong: string;
     accent: string;
     accentStrong: string;
     accentSoft: string;
+    ctaStart: string;
+    ctaEnd: string;
+    brandMist: string;
+    brandBlue: string;
+    brandLilac: string;
+    brandPink: string;
     success: string;
     successSoft: string;
     warning: string;
+    warningSoft: string;
     danger: string;
     dangerSoft: string;
     white: string;
+    black: string;
     overlay: string;
   };
 }
 
 const lightColors: AppTheme['colors'] = {
-  background: '#F7F6FA',
+  background: '#F6F8FC',
   surface: '#FFFFFF',
   surfaceElevated: '#FFFFFF',
-  surfaceMuted: '#F0EEF5',
-  ink: '#15131B',
-  inkMuted: '#5E5968',
-  inkSubtle: '#827C8E',
-  border: '#E3DFEA',
-  accent: '#7654FF',
-  accentStrong: '#5835E8',
-  accentSoft: '#EEE9FF',
-  success: '#168A64',
-  successSoft: '#E4F7F0',
-  warning: '#A86700',
-  danger: '#BC3545',
-  dangerSoft: '#FCE8EB',
+  surfaceMuted: '#EEF2F8',
+  surfaceGlass: 'rgba(255, 255, 255, 0.84)',
+  ink: '#373638',
+  inkMuted: '#5E5B67',
+  inkSubtle: '#6D6878',
+  border: '#D9DEE8',
+  borderStrong: '#8B93A3',
+  accent: '#7032FF',
+  accentStrong: '#4D1FC6',
+  accentSoft: '#EEE8FF',
+  ctaStart: '#5222C8',
+  ctaEnd: '#2858B9',
+  brandMist: '#D0DDEE',
+  brandBlue: '#2A94D4',
+  brandLilac: '#A67DFE',
+  brandPink: '#A950DF',
+  success: '#066B50',
+  successSoft: '#E2F5EF',
+  warning: '#7A4F00',
+  warningSoft: '#FFF3D6',
+  danger: '#A91F38',
+  dangerSoft: '#FFE9EE',
   white: '#FFFFFF',
-  overlay: 'rgba(21, 19, 27, 0.07)',
+  black: '#121212',
+  overlay: 'rgba(31, 24, 47, 0.08)',
 };
 
 const darkColors: AppTheme['colors'] = {
-  background: '#0E0D13',
-  surface: '#17151E',
-  surfaceElevated: '#201D29',
-  surfaceMuted: '#292532',
-  ink: '#F8F6FC',
-  inkMuted: '#C0BACB',
-  inkSubtle: '#948DA0',
-  border: '#373240',
-  accent: '#9B84FF',
-  accentStrong: '#B1A0FF',
-  accentSoft: '#2D254D',
-  success: '#5ED0A8',
-  successSoft: '#163A30',
-  warning: '#F2B755',
-  danger: '#FF8290',
-  dangerSoft: '#49252C',
+  background: '#0F0C17',
+  surface: '#171320',
+  surfaceElevated: '#201A2B',
+  surfaceMuted: '#292234',
+  surfaceGlass: 'rgba(23, 19, 32, 0.9)',
+  ink: '#FAF8FF',
+  inkMuted: '#C4BDCF',
+  inkSubtle: '#AAA1B5',
+  border: '#443850',
+  borderStrong: '#7B6B88',
+  accent: '#8D68FF',
+  accentStrong: '#C5B7FF',
+  accentSoft: '#2D2148',
+  ctaStart: '#633ED6',
+  ctaEnd: '#2854AE',
+  brandMist: '#D0DDEE',
+  brandBlue: '#67C6F5',
+  brandLilac: '#B79CFF',
+  brandPink: '#D58AF0',
+  success: '#6DDEB8',
+  successSoft: '#15382E',
+  warning: '#F4C56A',
+  warningSoft: '#41341D',
+  danger: '#FF8DA1',
+  dangerSoft: '#48212D',
   white: '#FFFFFF',
-  overlay: 'rgba(0, 0, 0, 0.28)',
+  black: '#121212',
+  overlay: 'rgba(0, 0, 0, 0.34)',
 };
 
+const ThemeContext = createContext<AppTheme | null>(null);
+
+export function AppThemeProvider({ children }: PropsWithChildren): React.JSX.Element {
+  // Mal's public product language is light-first. Reviewers can still inspect the
+  // independently designed dark theme from the header control.
+  const [mode, setMode] = useState<ThemeMode>('light');
+  const value = useMemo<AppTheme>(
+    () => ({
+      isDark: mode === 'dark',
+      mode,
+      toggleTheme: () => setMode((current) => (current === 'light' ? 'dark' : 'light')),
+      colors: mode === 'dark' ? darkColors : lightColors,
+    }),
+    [mode],
+  );
+
+  return createElement(ThemeContext.Provider, { value }, children);
+}
+
 export function useAppTheme(): AppTheme {
-  const isDark = useColorScheme() === 'dark';
-  return { isDark, colors: isDark ? darkColors : lightColors };
+  const value = useContext(ThemeContext);
+  if (!value) throw new Error('useAppTheme must be used within AppThemeProvider');
+  return value;
 }
 
 export const spacing = {
@@ -79,11 +141,36 @@ export const spacing = {
   xl: 24,
   xxl: 32,
   hero: 48,
+  section: 64,
 } as const;
 
 export const radii = {
   sm: 10,
   md: 16,
   lg: 24,
+  xl: 32,
   pill: 999,
+} as const;
+
+export const typography = {
+  family: Platform.select({
+    ios: 'System',
+    android: 'sans-serif',
+    default: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+  }),
+  mono: Platform.select({
+    ios: 'Menlo',
+    android: 'monospace',
+    default: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
+  }),
+} as const;
+
+export const motion = {
+  press: 140,
+  feedback: 220,
+  route: 320,
+  reveal: 360,
+  stagger: 44,
+  easeOut: Easing.bezier(0.16, 1, 0.3, 1),
+  nativeDriver: Platform.OS !== 'web',
 } as const;

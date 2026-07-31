@@ -28,8 +28,8 @@ For the detailed design and reliability analysis, see [docs/ARCHITECTURE.md](doc
 The credential-free web path requires no sign-in, Branch account, Firebase project, or device installation.
 
 1. Open the live web URL above, or run the project locally with `npm ci && npm run web`.
-2. Select **Generate my link**. A stable member code and shareable review URL are produced; `referral_link_generated` appears in the event ledger.
-3. Select **Share invite**. A supported browser opens Web Share; otherwise the full invite is copied. The ledger records the actual outcome rather than assuming success.
+2. Select **Generate my referral link**. A stable member code and shareable review URL are produced; `referral_link_generated` appears in the event ledger.
+3. Select **Share my invitation**. A supported browser opens Web Share; otherwise the full invite is copied. The ledger records the actual outcome rather than assuming success.
 4. Select **Direct open**. The Branch-shaped payload passes through the production parser and coordinator, then opens onboarding with the referral code visible and locked.
 5. Enter a name and email, then select **Create demo account**. The code is frozen when signup starts and completion is emitted only after the mock endpoint accepts it.
 6. Select **Run the flow again**, reset test state, and try **Deferred first launch**. It uses the same ingestion path with `+is_first_session=true` and is visibly identified as `demo-deferred`.
@@ -61,6 +61,9 @@ Useful edge-case checks:
 - [x] Firebase Analytics modular API in the native adapter
 - [x] Visible credential-free event ledger for reviewer verification
 - [x] Responsive web/native UI with light and dark appearance support
+- [x] Mal-inspired five-stage referral orbit tied to accepted analytics milestones
+- [x] Finite, state-driven motion with OS/browser reduced-motion support
+- [x] Customer-first mobile layout with reviewer mechanics progressively disclosed
 - [x] Mock signup acceptance and deterministic `+fail` rejection fixture
 - [x] CI entry point for type checking, linting, tests, and a web export
 
@@ -72,6 +75,14 @@ Useful edge-case checks:
 - [ ] Validate Android App Links and iOS Universal Links on physical devices
 - [ ] Record a real store-mediated deferred install through Play internal testing/TestFlight
 - [ ] Replace mock identity, referral API, signup, eligibility, and rewards with authoritative backend services
+
+## Experience design
+
+The interface is a brand-inspired assessment prototype, not a claim to be Mal's production UI. It uses the supplied Mal lockup and the public product's pale-blue, charcoal, violet, lilac, and cyan visual language while keeping the referral task—not the engineering controls—as the primary experience.
+
+The signature **Mal Trust Loop** is a five-node orbit mapped directly to the required funnel events. Each node advances only after an accepted milestone, so the visual centerpiece is also a truthful system-state indicator. Technical telemetry remains visible for reviewers on wide screens and collapses behind an explicit control on phones.
+
+Motion is finite and functional: entry reveals, button feedback, referral-code state changes, link handoff, and completion confirmation. Animations use opacity and transforms, stop on cleanup, never delay analytics or navigation, and become immediately static when reduced motion is enabled. The light-first interface also includes a deliberate dark theme rather than relying on a generic system inversion.
 
 ## Technology choices
 
@@ -401,6 +412,8 @@ npm run build:web
 ```
 
 GitHub Actions runs the same checks on pushes to `main` and on pull requests. Native verification remains separate because it requires provider credentials, signing identities, physical devices, and store/install state.
+
+The rendered reviewer build was also checked at 375 x 812, 812 x 375, and 1440 x 1000 in light and dark themes. The reduced-motion path was verified with `prefers-reduced-motion: reduce`; content remains immediately visible and navigation animation is disabled.
 
 ## Known limitations and proof boundary
 

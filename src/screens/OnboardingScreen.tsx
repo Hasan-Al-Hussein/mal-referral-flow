@@ -1,5 +1,6 @@
 import { Feather } from '@expo/vector-icons';
-import { useState } from 'react';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useMemo, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -10,49 +11,78 @@ import {
   View,
 } from 'react-native';
 
+import { getAcceptedReferralMilestones } from '../application/referralProgress';
 import { useReferralRuntime } from '../application/ReferralRuntime';
 import { Button } from '../components/Button';
 import { EventLedger } from '../components/EventLedger';
 import { PageIntro } from '../components/PageIntro';
+import { ReferralOrbit } from '../components/ReferralOrbit';
 import { ScreenShell } from '../components/ScreenShell';
 import { StatusBanner } from '../components/StatusBanner';
-import { radii, useAppTheme } from '../theme/theme';
+import { AnimatedReveal } from '../motion/AnimatedReveal';
+import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 import type { RootStackParamList } from '../navigation/types';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Onboarding'>;
+type FieldErrors = { firstName?: string; email?: string };
 
 export function OnboardingScreen({ route, navigation }: Props): React.JSX.Element {
   const { attribution } = route.params;
-  const { colors } = useAppTheme();
+  const { colors, isDark } = useAppTheme();
   const { width } = useWindowDimensions();
-  const isWide = width >= 880;
-  const { coordinator } = useReferralRuntime();
+  const isWide = width >= 1200;
+  const arrivalWide = width >= 650;
+  const { coordinator, events } = useReferralRuntime();
   const [hasStarted, setHasStarted] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [email, setEmail] = useState('');
+  const [isStarting, setIsStarting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [mobileTraceOpen, setMobileTraceOpen] = useState(false);
+  const [focusedField, setFocusedField] = useState<'firstName' | 'email' | null>(null);
+  const firstNameRef = useRef<TextInput>(null);
+  const emailRef = useRef<TextInput>(null);
+  const submissionLock = useRef(false);
+  const completedSteps = useMemo(() => {
+    return getAcceptedReferralMilestones(events, attribution.referralCode).size;
+  }, [attribution.referralCode, events]);
 
   const begin = async () => {
-    setError(null);
-    await coordinator.beginSignup(attribution.referralCode, attribution);
-    setHasStarted(true);
+    setServerError(null);
+    setIsStarting(true);
+    try {
+      await coordinator.beginSignup(attribution.referralCode, attribution);
+      setHasStarted(true);
+      requestAnimationFrame(() => firstNameRef.current?.focus());
+    } catch (caught) {
+      setServerError(caught instanceof Error ? caught.message : 'Signup could not be started.');
+    } finally {
+      setIsStarting(false);
+    }
   };
 
   const complete = async () => {
-    setError(null);
+    if (submissionLock.current) return;
+    setServerError(null);
     const normalizedEmail = email.trim().toLowerCase();
-    if (!firstName.trim()) {
-      setError('Enter your first name to continue.');
+    const nextErrors: FieldErrors = {};
+    if (!firstName.trim()) nextErrors.firstName = 'Enter your first name.';
+    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) nextErrors.email = 'Enter a valid email address.';
+    setFieldErrors(nextErrors);
+    if (nextErrors.firstName) {
+      firstNameRef.current?.focus();
       return;
     }
-    if (!/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
-      setError('Enter a valid email address to continue.');
+    if (nextErrors.email) {
+      emailRef.current?.focus();
       return;
     }
 
+    submissionLock.current = true;
     setIsSubmitting(true);
     try {
       const result = await coordinator.completeSignup(
@@ -62,110 +92,216 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
       );
       navigation.replace('Success', result);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Signup could not be completed.');
+      setServerError(caught instanceof Error ? caught.message : 'Signup could not be completed.');
     } finally {
+      submissionLock.current = false;
       setIsSubmitting(false);
     }
   };
 
   return (
     <ScreenShell>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.page}>
-          <Button label="Back to referral lab" icon="arrow-left" variant="ghost" onPress={() => navigation.navigate('Invite')} style={styles.backButton} />
+          <Button
+            label="Back to referral lab"
+            icon="arrow-left"
+            variant="ghost"
+            onPress={() => navigation.navigate('Invite')}
+            style={styles.backButton}
+          />
           <PageIntro
-            eyebrow={attribution.kind.includes('deferred') ? 'FIRST LAUNCH ATTRIBUTION' : 'REFERRED ONBOARDING'}
-            title="Your invitation arrived safely."
-            description="The referral was validated, persisted, and applied before this screen opened—even when authentication and navigation were not ready yet."
+            eyebrow={attribution.kind.includes('deferred') ? 'FIRST-LAUNCH ATTRIBUTION' : 'REFERRED ONBOARDING'}
+            title="Your invitation found you."
+            description="The referral was validated and saved before this screen opened, so the right invitation stays attached throughout signup."
           />
 
           <View style={[styles.columns, !isWide && styles.stacked]}>
             <View style={styles.mainColumn}>
-              <View style={[styles.appliedCard, { backgroundColor: colors.successSoft }]}>
-                <View style={[styles.appliedIcon, { backgroundColor: colors.surface }]}>
-                  <Feather name="check" color={colors.success} size={20} />
-                </View>
-                <View style={styles.appliedCopy}>
-                  <Text style={[styles.appliedEyebrow, { color: colors.success }]}>REFERRAL PRE-APPLIED</Text>
-                  <Text selectable style={[styles.appliedCode, { color: colors.ink }]}>{attribution.referralCode}</Text>
-                  <Text style={[styles.appliedMeta, { color: colors.inkMuted }]}>
-                    {attribution.kind.replace('-', ' ')} · destination allow-listed
-                  </Text>
-                </View>
-                <Feather name="lock" color={colors.success} size={18} />
-              </View>
-
-              {!hasStarted ? (
-                <View style={[styles.formCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <View style={[styles.stepBadge, { backgroundColor: colors.accentSoft }]}>
-                    <Text style={[styles.stepBadgeText, { color: colors.accentStrong }]}>STEP 1 OF 2</Text>
-                  </View>
-                  <Text style={[styles.formTitle, { color: colors.ink }]}>Open your Mal account</Text>
-                  <Text style={[styles.formDescription, { color: colors.inkMuted }]}>
-                    Your referral stays attached through the signup flow. It is frozen when you begin so a later link cannot silently replace it.
-                  </Text>
-                  <View style={styles.trustList}>
-                    <TrustRow icon="shield" label="Code validated before navigation" />
-                    <TrustRow icon="save" label="Attribution persisted across restarts" />
-                    <TrustRow icon="eye-off" label="No personal data in analytics events" />
-                  </View>
-                  <Button label="Start secure signup" icon="arrow-right" fullWidth onPress={() => void begin()} />
-                </View>
-              ) : (
-                <View style={[styles.formCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                  <View style={[styles.stepBadge, { backgroundColor: colors.accentSoft }]}>
-                    <Text style={[styles.stepBadgeText, { color: colors.accentStrong }]}>STEP 2 OF 2</Text>
-                  </View>
-                  <Text style={[styles.formTitle, { color: colors.ink }]}>A few details to continue</Text>
-                  <Text style={[styles.formDescription, { color: colors.inkMuted }]}>
-                    This prototype uses a local endpoint. No information leaves the device.
-                  </Text>
-
-                  <View style={styles.fields}>
-                    <View style={styles.fieldGroup}>
-                      <Text style={[styles.label, { color: colors.ink }]}>First name</Text>
-                      <TextInput
-                        accessibilityLabel="First name"
-                        autoComplete="name-given"
-                        autoCapitalize="words"
-                        placeholder="Your first name"
-                        placeholderTextColor={colors.inkSubtle}
-                        value={firstName}
-                        onChangeText={setFirstName}
-                        style={[styles.input, { color: colors.ink, backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}
-                      />
+              <AnimatedReveal delay={motion.stagger * 2}>
+                <LinearGradient
+                  colors={
+                    isDark
+                      ? ['#251B36', '#182032', '#16303A']
+                      : ['#F7EDFF', '#E9EEFF', '#E6F8F7']
+                  }
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={[styles.arrivalCard, !arrivalWide && styles.arrivalStacked, { borderColor: colors.border }]}
+                >
+                  <View style={styles.arrivalCopy}>
+                    <View style={styles.arrivalBadgeRow}>
+                      <View style={[styles.arrivalIcon, { backgroundColor: colors.surfaceGlass }]}>
+                        <Feather name="check" color={colors.success} size={18} />
+                      </View>
+                      <View style={styles.arrivalBadgeCopy}>
+                        <Text style={[styles.arrivalEyebrow, { color: colors.success }]}>REFERRAL PRE-APPLIED</Text>
+                        <Text style={[styles.arrivalMeta, { color: colors.inkMuted }]}>{attribution.kind.replace('-', ' ')} · destination verified</Text>
+                      </View>
                     </View>
-                    <View style={styles.fieldGroup}>
-                      <Text style={[styles.label, { color: colors.ink }]}>Email address</Text>
-                      <TextInput
-                        accessibilityLabel="Email address"
-                        autoComplete="email"
-                        autoCapitalize="none"
-                        keyboardType="email-address"
-                        placeholder="you@example.com"
-                        placeholderTextColor={colors.inkSubtle}
-                        value={email}
-                        onChangeText={setEmail}
-                        style={[styles.input, { color: colors.ink, backgroundColor: colors.surfaceMuted, borderColor: colors.border }]}
-                      />
-                    </View>
-                    <View style={styles.fieldGroup}>
-                      <Text style={[styles.label, { color: colors.ink }]}>Referral code</Text>
-                      <View style={[styles.lockedInput, { backgroundColor: colors.successSoft, borderColor: colors.success }]}>
-                        <Text selectable style={[styles.lockedCode, { color: colors.ink }]}>{attribution.referralCode}</Text>
-                        <Feather name="lock" color={colors.success} size={16} />
+                    <Text style={[styles.arrivalTitle, { color: colors.ink }]}>The link survived the handoff.</Text>
+                    <Text style={[styles.arrivalDescription, { color: colors.inkMuted }]}>The code is persisted before navigation and becomes immutable when signup starts.</Text>
+                    <View style={[styles.appliedCode, { backgroundColor: colors.surfaceGlass, borderColor: colors.borderStrong }]}>
+                      <View style={styles.appliedCodeCopy}>
+                        <Text style={[styles.codeLabel, { color: colors.inkSubtle }]}>APPLIED CODE</Text>
+                        <Text selectable style={[styles.code, { color: colors.ink }]}>{attribution.referralCode}</Text>
+                      </View>
+                      <View style={[styles.lockIcon, { backgroundColor: colors.successSoft }]}>
+                        <Feather name="lock" color={colors.success} size={17} />
                       </View>
                     </View>
                   </View>
-                  {error ? <StatusBanner tone="error" title="Check this step" message={error} /> : null}
-                  <Button label="Create demo account" icon="check-circle" loading={isSubmitting} fullWidth onPress={() => void complete()} />
-                  <Text style={[styles.terms, { color: colors.inkSubtle }]}>By continuing, you are exercising a local assessment fixture—not creating a real financial account.</Text>
+                  <View style={styles.arrivalOrbit}>
+                    <ReferralOrbit activeSteps={completedSteps} size={arrivalWide ? 188 : 170} />
+                  </View>
+                </LinearGradient>
+              </AnimatedReveal>
+
+              <AnimatedReveal replayKey={hasStarted} distance={10}>
+                <View style={[styles.formCard, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
+                  <StepHeader step={hasStarted ? 2 : 1} />
+
+                  {!hasStarted ? (
+                    <>
+                      <View>
+                        <Text style={[styles.formTitle, { color: colors.ink }]}>Open your Mal account</Text>
+                        <Text style={[styles.formDescription, { color: colors.inkMuted }]}>Your referral remains protected as you move into the secure signup flow.</Text>
+                      </View>
+                      <View style={styles.trustList}>
+                        <TrustRow icon="shield" label="Code validated before navigation" />
+                        <TrustRow icon="save" label="Attribution persisted across restarts" />
+                        <TrustRow icon="eye-off" label="No personal data in analytics events" />
+                      </View>
+                      {serverError ? <StatusBanner tone="error" title="Signup could not start" message={serverError} /> : null}
+                      <Button label="Start secure signup" icon="arrow-right" loading={isStarting} fullWidth onPress={() => void begin()} />
+                    </>
+                  ) : (
+                    <>
+                      <View>
+                        <Text style={[styles.formTitle, { color: colors.ink }]}>A few details to continue</Text>
+                        <Text style={[styles.formDescription, { color: colors.inkMuted }]}>This assessment uses a local endpoint. Nothing entered here leaves the device.</Text>
+                      </View>
+
+                      <View style={styles.fields}>
+                        <View style={styles.fieldGroup}>
+                          <Text style={[styles.label, { color: colors.ink }]}>First name</Text>
+                          <TextInput
+                            ref={firstNameRef}
+                            accessibilityLabel="First name"
+                            accessibilityHint="Required"
+                            autoComplete="name-given"
+                            autoCapitalize="words"
+                            placeholder="Your first name"
+                            placeholderTextColor={colors.inkSubtle}
+                            editable={!isSubmitting}
+                            value={firstName}
+                            onBlur={() => {
+                              setFocusedField((current) => (current === 'firstName' ? null : current));
+                              if (!firstName.trim()) setFieldErrors((current) => ({ ...current, firstName: 'Enter your first name.' }));
+                            }}
+                            onFocus={() => setFocusedField('firstName')}
+                            onChangeText={(value) => {
+                              setFirstName(value);
+                              if (fieldErrors.firstName) {
+                                setFieldErrors(({ firstName: _ignored, ...current }) => current);
+                              }
+                            }}
+                            returnKeyType="next"
+                            onSubmitEditing={() => emailRef.current?.focus()}
+                            style={[
+                              styles.input,
+                              {
+                                color: colors.ink,
+                                backgroundColor: colors.surfaceElevated,
+                                borderColor: fieldErrors.firstName
+                                  ? colors.danger
+                                  : focusedField === 'firstName'
+                                    ? colors.accent
+                                    : colors.borderStrong,
+                              },
+                            ]}
+                          />
+                          {fieldErrors.firstName ? <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: colors.danger }]}>{fieldErrors.firstName}</Text> : null}
+                        </View>
+                        <View style={styles.fieldGroup}>
+                          <Text style={[styles.label, { color: colors.ink }]}>Email address</Text>
+                          <TextInput
+                            ref={emailRef}
+                            accessibilityLabel="Email address"
+                            accessibilityHint="Required"
+                            autoComplete="email"
+                            autoCapitalize="none"
+                            keyboardType="email-address"
+                            placeholder="you@example.com"
+                            placeholderTextColor={colors.inkSubtle}
+                            editable={!isSubmitting}
+                            value={email}
+                            onBlur={() => setFocusedField((current) => (current === 'email' ? null : current))}
+                            onFocus={() => setFocusedField('email')}
+                            onChangeText={(value) => {
+                              setEmail(value);
+                              if (fieldErrors.email) {
+                                setFieldErrors(({ email: _ignored, ...current }) => current);
+                              }
+                            }}
+                            returnKeyType="done"
+                            onSubmitEditing={() => void complete()}
+                            style={[
+                              styles.input,
+                              {
+                                color: colors.ink,
+                                backgroundColor: colors.surfaceElevated,
+                                borderColor: fieldErrors.email
+                                  ? colors.danger
+                                  : focusedField === 'email'
+                                    ? colors.accent
+                                    : colors.borderStrong,
+                              },
+                            ]}
+                          />
+                          {fieldErrors.email ? <Text accessibilityLiveRegion="polite" style={[styles.fieldError, { color: colors.danger }]}>{fieldErrors.email}</Text> : null}
+                        </View>
+                        <View style={styles.fieldGroup}>
+                          <Text style={[styles.label, { color: colors.ink }]}>Referral code</Text>
+                          <View accessibilityLabel={`Referral code ${attribution.referralCode}, locked`} style={[styles.lockedInput, { backgroundColor: colors.successSoft, borderColor: colors.success }]}>
+                            <Text selectable style={[styles.lockedCode, { color: colors.ink }]}>{attribution.referralCode}</Text>
+                            <Feather name="lock" color={colors.success} size={16} />
+                          </View>
+                          <Text style={[styles.helper, { color: colors.inkSubtle }]}>Applied automatically and protected from replacement.</Text>
+                        </View>
+                      </View>
+                      {serverError ? <StatusBanner tone="error" title="Signup could not be completed" message={serverError} /> : null}
+                      <Button label="Create demo account" icon="check-circle" loading={isSubmitting} fullWidth onPress={() => void complete()} />
+                      <Text style={[styles.terms, { color: colors.inkSubtle }]}>Assessment fixture only—this does not create a real financial account.</Text>
+                    </>
+                  )}
                 </View>
-              )}
+              </AnimatedReveal>
+
+              {!isWide ? (
+                <View style={styles.mobileTrace}>
+                  <Button
+                    label={mobileTraceOpen ? 'Hide technical trace' : 'View technical trace'}
+                    icon={mobileTraceOpen ? 'chevron-up' : 'activity'}
+                    variant="secondary"
+                    fullWidth
+                    accessibilityState={{ expanded: mobileTraceOpen }}
+                    onPress={() => setMobileTraceOpen((current) => !current)}
+                  />
+                  {mobileTraceOpen ? (
+                    <AnimatedReveal duration={motion.feedback} distance={8}>
+                      <EventLedger referralCode={attribution.referralCode} />
+                    </AnimatedReveal>
+                  ) : null}
+                </View>
+              ) : null}
             </View>
-            <View style={styles.sideColumn}>
-              <EventLedger />
-            </View>
+
+            {isWide ? (
+              <AnimatedReveal delay={motion.stagger * 3} style={styles.sideColumn}>
+                <EventLedger referralCode={attribution.referralCode} />
+              </AnimatedReveal>
+            ) : null}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -173,12 +309,29 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
   );
 }
 
+function StepHeader({ step }: { step: 1 | 2 }): React.JSX.Element {
+  const { colors } = useAppTheme();
+  return (
+    <View style={styles.stepHeader}>
+      <View>
+        <Text style={[styles.stepEyebrow, { color: colors.accentStrong }]}>SECURE SIGNUP</Text>
+        <Text style={[styles.stepLabel, { color: colors.inkMuted }]}>Step {step} of 2</Text>
+      </View>
+      <View style={styles.stepBars}>
+        {[1, 2].map((item) => (
+          <View key={item} style={[styles.stepBar, { backgroundColor: item <= step ? colors.accent : colors.border }]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function TrustRow({ icon, label }: { icon: keyof typeof Feather.glyphMap; label: string }): React.JSX.Element {
   const { colors } = useAppTheme();
   return (
     <View style={styles.trustRow}>
-      <View style={[styles.trustIcon, { backgroundColor: colors.surfaceMuted }]}>
-        <Feather name={icon} color={colors.accentStrong} size={15} />
+      <View style={[styles.trustIcon, { backgroundColor: colors.accentSoft }]}>
+        <Feather name={icon} color={colors.accentStrong} size={16} />
       </View>
       <Text style={[styles.trustText, { color: colors.inkMuted }]}>{label}</Text>
     </View>
@@ -186,32 +339,48 @@ function TrustRow({ icon, label }: { icon: keyof typeof Feather.glyphMap; label:
 }
 
 const styles = StyleSheet.create({
-  page: { paddingTop: 22, gap: 28 },
-  backButton: { alignSelf: 'flex-start', paddingHorizontal: 4 },
+  page: { paddingTop: 24, gap: 30 },
+  backButton: { alignSelf: 'flex-start' },
   columns: { flexDirection: 'row', alignItems: 'flex-start', gap: 28 },
   stacked: { flexDirection: 'column' },
-  mainColumn: { flex: 1.65, minWidth: 0, gap: 16 },
-  sideColumn: { flex: 1, minWidth: 280, width: '100%' },
-  appliedCard: { borderRadius: radii.lg, padding: 20, flexDirection: 'row', alignItems: 'center', gap: 14 },
-  appliedIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  appliedCopy: { flex: 1 },
-  appliedEyebrow: { fontSize: 9, lineHeight: 13, fontWeight: '800', letterSpacing: 1.1 },
-  appliedCode: { marginTop: 4, fontSize: 22, lineHeight: 28, fontWeight: '800', letterSpacing: 1.1 },
-  appliedMeta: { marginTop: 2, fontSize: 11, lineHeight: 16, textTransform: 'capitalize' },
-  formCard: { borderWidth: 1, borderRadius: radii.lg, padding: 24, gap: 18 },
-  stepBadge: { alignSelf: 'flex-start', borderRadius: radii.pill, paddingHorizontal: 10, paddingVertical: 5 },
-  stepBadgeText: { fontSize: 9, lineHeight: 13, fontWeight: '800', letterSpacing: 1 },
-  formTitle: { fontSize: 24, lineHeight: 30, fontWeight: '700', letterSpacing: -0.5 },
-  formDescription: { fontSize: 14, lineHeight: 22 },
-  trustList: { gap: 12, paddingVertical: 2 },
-  trustRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
-  trustIcon: { width: 32, height: 32, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  trustText: { flex: 1, fontSize: 13, lineHeight: 18 },
-  fields: { gap: 15 },
+  mainColumn: { flex: 1.72, minWidth: 0, width: '100%', gap: 16 },
+  sideColumn: { flex: 0.88, minWidth: 300, width: '100%' },
+  arrivalCard: { borderWidth: 1, borderRadius: radii.xl, padding: 25, flexDirection: 'row', alignItems: 'center', gap: 20, overflow: 'hidden' },
+  arrivalStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  arrivalCopy: { flex: 1, minWidth: 0, gap: 14 },
+  arrivalBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  arrivalBadgeCopy: { flex: 1, minWidth: 0 },
+  arrivalIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  arrivalEyebrow: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05 },
+  arrivalMeta: { marginTop: 2, fontFamily: typography.family, fontSize: 12, lineHeight: 18, textTransform: 'capitalize' },
+  arrivalTitle: { fontFamily: typography.family, fontSize: 25, lineHeight: 31, fontWeight: '800', letterSpacing: -0.55 },
+  arrivalDescription: { fontFamily: typography.family, fontSize: 14, lineHeight: 22 },
+  appliedCode: { borderWidth: 1, borderRadius: radii.lg, padding: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 14 },
+  appliedCodeCopy: { flex: 1, minWidth: 0 },
+  codeLabel: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1 },
+  code: { marginTop: 4, flexShrink: 1, fontFamily: typography.mono, fontSize: 22, lineHeight: 29, fontWeight: '700', letterSpacing: 1 },
+  lockIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  arrivalOrbit: { alignItems: 'center', justifyContent: 'center' },
+  formCard: { borderWidth: 1, borderRadius: radii.xl, padding: 26, gap: 20, shadowColor: '#2B1C4C', shadowOpacity: 0.06, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 3 },
+  stepHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 18 },
+  stepEyebrow: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05 },
+  stepLabel: { marginTop: 2, fontFamily: typography.family, fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  stepBars: { flex: 1, maxWidth: 190, flexDirection: 'row', gap: 7 },
+  stepBar: { flex: 1, height: 5, borderRadius: 3 },
+  formTitle: { fontFamily: typography.family, fontSize: 27, lineHeight: 33, fontWeight: '800', letterSpacing: -0.6 },
+  formDescription: { marginTop: 7, fontFamily: typography.family, fontSize: 15, lineHeight: 23 },
+  trustList: { gap: 12 },
+  trustRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  trustIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  trustText: { flex: 1, fontFamily: typography.family, fontSize: 14, lineHeight: 20 },
+  fields: { gap: 17 },
   fieldGroup: { gap: 7 },
-  label: { fontSize: 12, lineHeight: 17, fontWeight: '700' },
-  input: { minHeight: 52, borderRadius: radii.md, borderWidth: 1, paddingHorizontal: 15, fontSize: 15 },
-  lockedInput: { minHeight: 52, borderRadius: radii.md, borderWidth: 1, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  lockedCode: { fontSize: 14, fontWeight: '700', letterSpacing: 0.7 },
-  terms: { textAlign: 'center', fontSize: 10, lineHeight: 15 },
+  label: { fontFamily: typography.family, fontSize: 14, lineHeight: 19, fontWeight: '700' },
+  input: { minHeight: 54, borderRadius: radii.md, borderWidth: 1, paddingHorizontal: 15, fontFamily: typography.family, fontSize: 16 },
+  fieldError: { fontFamily: typography.family, fontSize: 12, lineHeight: 18, fontWeight: '600' },
+  lockedInput: { minHeight: 54, borderRadius: radii.md, borderWidth: 1, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  lockedCode: { flex: 1, minWidth: 0, fontFamily: typography.mono, fontSize: 14, lineHeight: 20, fontWeight: '700', letterSpacing: 0.7 },
+  helper: { fontFamily: typography.family, fontSize: 12, lineHeight: 18 },
+  terms: { textAlign: 'center', fontFamily: typography.family, fontSize: 12, lineHeight: 18 },
+  mobileTrace: { gap: 12 },
 });

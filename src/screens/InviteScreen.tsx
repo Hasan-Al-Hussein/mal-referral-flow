@@ -1,15 +1,25 @@
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import {
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 
+import { getAcceptedReferralMilestones } from '../application/referralProgress';
 import { useReferralRuntime } from '../application/ReferralRuntime';
 import { Button } from '../components/Button';
 import { EventLedger } from '../components/EventLedger';
 import { PageIntro } from '../components/PageIntro';
+import { ReferralOrbit } from '../components/ReferralOrbit';
 import { ScreenShell } from '../components/ScreenShell';
 import { StatusBanner } from '../components/StatusBanner';
-import { radii, useAppTheme } from '../theme/theme';
+import { AnimatedReveal } from '../motion/AnimatedReveal';
+import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 import type { GeneratedReferral } from '../application/ReferralCoordinator';
 import type { RootStackParamList } from '../navigation/types';
@@ -22,17 +32,28 @@ const MOCK_USER = { id: 'member_0194', name: 'Hasan', initials: 'HA' };
 const REVIEW_CODE = 'MAL-H7K9P2Q4';
 
 export function InviteScreen({ navigation }: Props): React.JSX.Element {
-  const { colors } = useAppTheme();
+  const { colors, isDark } = useAppTheme();
   const { width } = useWindowDimensions();
-  const isWide = width >= 880;
-  const { coordinator, clearLedger } = useReferralRuntime();
+  const isWide = width >= 1200;
+  const heroWide = width >= 680;
+  const { coordinator, clearLedger, events } = useReferralRuntime();
   const [referral, setReferral] = useState<GeneratedReferral | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSharing, setIsSharing] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
-  const displayCode = referral?.referralCode ?? 'YOUR CODE';
+  const [labOpen, setLabOpen] = useState(false);
+  const [labFocused, setLabFocused] = useState(false);
+  const [mobileTraceOpen, setMobileTraceOpen] = useState(false);
+  const displayCode = referral?.referralCode ?? 'MAL ••••••••';
+  const completedSteps = useMemo(() => {
+    if (!referral) return 0;
+    return getAcceptedReferralMilestones(events, referral.referralCode).size;
+  }, [events, referral]);
   const architectureLabel = useMemo(
-    () => (coordinator.integrationMode === 'native' ? 'Branch + Firebase' : 'Deterministic web adapters'),
+    () =>
+      coordinator.integrationMode === 'native'
+        ? 'Branch.io + Firebase Analytics'
+        : 'Deterministic reviewer adapters',
     [coordinator.integrationMode],
   );
 
@@ -44,8 +65,8 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
       setReferral(generated);
       setNotice({
         tone: 'success',
-        title: 'Referral link ready',
-        message: 'The code is stable for this member and the generated event was recorded once.',
+        title: 'Your referral link is ready',
+        message: 'It is unique to this member and the generation milestone was recorded exactly once.',
       });
     } catch (error) {
       setNotice({
@@ -67,11 +88,11 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
     if (result.status === 'shared') {
       setNotice({
         tone: 'success',
-        title: result.channel === 'clipboard' ? 'Invite copied' : 'Invite handed to share sheet',
+        title: result.channel === 'clipboard' ? 'Invite copied' : 'Share sheet opened',
         message:
           result.channel === 'clipboard'
             ? 'Web Share is unavailable here, so the complete invite was copied to your clipboard.'
-            : 'The shared event was recorded only after the share action completed.',
+            : 'The shared milestone was recorded only after the share action completed.',
       });
     } else if (result.status === 'cancelled') {
       setNotice({ tone: 'info', title: 'Share cancelled', message: 'No success event was recorded.' });
@@ -87,7 +108,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
       setNotice({
         tone: 'error',
         title: 'Malformed link safely rejected',
-        message: 'The app stayed on this screen and emitted explicit resolution failure events.',
+        message: 'The app stayed here and emitted explicit resolution-failure events.',
       });
     }
   };
@@ -99,7 +120,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
     setNotice({
       tone: 'info',
       title: 'Test state cleared',
-      message: 'Attribution, milestone dedupe and the visible event ledger were reset.',
+      message: 'Attribution, milestone deduplication, and the visible event trace were reset.',
     });
     navigation.popToTop();
   };
@@ -107,122 +128,180 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
   return (
     <ScreenShell>
       <View style={styles.page}>
-        {coordinator.integrationMode === 'web-demo' ? (
-          <StatusBanner
-            tone="info"
-            title="Interactive reviewer build"
-            message="This browser build exercises the same state machine and analytics contract. Native Branch install attribution and Firebase delivery require the documented custom build."
-          />
-        ) : null}
-
         <PageIntro
           eyebrow="MEMBER REFERRALS"
-          title="Invite someone into better banking."
-          description="Generate a private referral link, share it natively, and watch the attributed signup journey end to end."
+          title="A trusted introduction, carried all the way through."
+          description="Create a private link, share it in one tap, and preserve attribution from the first click to completed signup."
         />
 
         <View style={[styles.columns, !isWide && styles.stacked]}>
           <View style={styles.mainColumn}>
-            <View style={[styles.identity, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={[styles.avatar, { backgroundColor: colors.accentSoft }]}>
-                <Text style={[styles.avatarText, { color: colors.accentStrong }]}>{MOCK_USER.initials}</Text>
-              </View>
-              <View style={styles.identityCopy}>
-                <Text style={[styles.signedIn, { color: colors.success }]}>AUTHENTICATED MEMBER</Text>
-                <Text style={[styles.userName, { color: colors.ink }]}>Signed in as {MOCK_USER.name}</Text>
-              </View>
-              <Feather name="shield" color={colors.success} size={20} />
-            </View>
+            <AnimatedReveal delay={motion.stagger * 2}>
+              <LinearGradient
+                colors={
+                  isDark
+                    ? ['#241A35', '#171827', '#182637']
+                    : ['#F7EDFF', '#E8EEFF', '#E4F5FB']
+                }
+                locations={[0, 0.5, 1]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.heroCard, { borderColor: colors.border }]}
+              >
+                <View style={[styles.heroLayout, !heroWide && styles.heroStacked]}>
+                  <View style={styles.heroCopy}>
+                    <View style={styles.memberRow}>
+                      <View style={[styles.avatar, { backgroundColor: colors.surfaceGlass }]}>
+                        <Text style={[styles.avatarText, { color: colors.accentStrong }]}>{MOCK_USER.initials}</Text>
+                      </View>
+                      <View style={styles.memberCopy}>
+                        <View style={styles.verifiedRow}>
+                          <Feather name="shield" color={colors.success} size={14} />
+                          <Text style={[styles.verified, { color: colors.success }]}>VERIFIED MEMBER</Text>
+                        </View>
+                        <Text style={[styles.memberName, { color: colors.ink }]}>Welcome back, {MOCK_USER.name}</Text>
+                      </View>
+                    </View>
 
-            <LinearGradient
-              colors={colors.ink === '#15131B' ? ['#201638', '#4B2E96'] : ['#251B43', '#5237A3']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.pass}
-            >
-              <View style={styles.passGlow} />
-              <View style={styles.passTop}>
-                <View>
-                  <Text style={styles.passEyebrow}>MAL MEMBER PASS</Text>
-                  <Text style={styles.passTitle}>A warmer welcome.</Text>
-                </View>
-                <View style={styles.passIcon}>
-                  <Feather name="gift" color="#FFFFFF" size={21} />
-                </View>
-              </View>
-              <View>
-                <Text style={styles.codeLabel}>REFERRAL CODE</Text>
-                <Text selectable style={styles.code}>{displayCode}</Text>
-              </View>
-              <Text style={styles.passFinePrint}>Unique to member · destination locked · attribution protected</Text>
-            </LinearGradient>
+                    <View>
+                      <Text style={[styles.heroEyebrow, { color: colors.accentStrong }]}>YOUR INVITATION</Text>
+                      <Text style={[styles.heroTitle, { color: colors.ink }]}>Share a better way to bank.</Text>
+                      <Text style={[styles.heroDescription, { color: colors.inkMuted }]}>A personal link that remembers who invited them—even when installation happens between click and signup.</Text>
+                    </View>
 
-            <View style={styles.buttonRow}>
-              {!referral ? (
-                <Button
-                  label="Generate my link"
-                  icon="zap"
-                  loading={isGenerating}
-                  onPress={() => void generate()}
-                  fullWidth={!isWide}
-                />
-              ) : (
-                <>
-                  <Button
-                    label="Share invite"
-                    icon="share-2"
-                    loading={isSharing}
-                    onPress={() => void share()}
-                    fullWidth={!isWide}
-                  />
-                  <Button
-                    label="Link generated"
-                    icon="check"
-                    variant="secondary"
-                    disabled
-                    onPress={() => undefined}
-                    fullWidth={!isWide}
-                  />
-                </>
-              )}
-            </View>
+                    <View style={[styles.codePanel, { backgroundColor: colors.surfaceGlass, borderColor: colors.borderStrong }]}>
+                      <View style={styles.codeHeading}>
+                        <Text style={[styles.codeLabel, { color: colors.inkSubtle }]}>REFERRAL CODE</Text>
+                        {referral ? (
+                          <View style={[styles.readyPill, { backgroundColor: colors.successSoft }]}>
+                            <View style={[styles.readyDot, { backgroundColor: colors.success }]} />
+                            <Text style={[styles.readyText, { color: colors.success }]}>READY</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <AnimatedReveal variant="scale" replayKey={displayCode} duration={motion.feedback}>
+                        <Text selectable style={[styles.code, { color: colors.ink }]}>{displayCode}</Text>
+                      </AnimatedReveal>
+                    </View>
+
+                    {!referral ? (
+                      <Button
+                        label="Generate my referral link"
+                        icon="zap"
+                        loading={isGenerating}
+                        onPress={() => void generate()}
+                        fullWidth={!heroWide}
+                      />
+                    ) : (
+                      <Button
+                        label="Share my invitation"
+                        icon="share-2"
+                        loading={isSharing}
+                        onPress={() => void share()}
+                        fullWidth={!heroWide}
+                      />
+                    )}
+                  </View>
+
+                  <View style={[styles.orbitStage, !heroWide && styles.orbitStageCompact]}>
+                    <ReferralOrbit activeSteps={completedSteps} size={heroWide ? 270 : 218} />
+                    <Text style={[styles.orbitCaption, { color: colors.inkMuted }]}>Five milestones. One durable referral identity.</Text>
+                  </View>
+                </View>
+              </LinearGradient>
+            </AnimatedReveal>
 
             {referral ? (
-              <View style={[styles.linkBox, { backgroundColor: colors.surfaceMuted }]}>
-                <Feather name="link" color={colors.accentStrong} size={17} />
-                <Text selectable numberOfLines={2} style={[styles.link, { color: colors.inkMuted }]}>
-                  {referral.url}
-                </Text>
-              </View>
+              <AnimatedReveal replayKey={referral.url} distance={8}>
+                <View style={[styles.linkBox, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
+                  <View style={[styles.linkIcon, { backgroundColor: colors.accentSoft }]}>
+                    <Feather name="link" color={colors.accentStrong} size={17} />
+                  </View>
+                  <View style={styles.linkCopy}>
+                    <Text style={[styles.linkLabel, { color: colors.inkSubtle }]}>SHAREABLE LINK</Text>
+                    <Text selectable numberOfLines={2} style={[styles.link, { color: colors.inkMuted }]}>{referral.url}</Text>
+                  </View>
+                  <Feather name="check-circle" color={colors.success} size={19} />
+                </View>
+              </AnimatedReveal>
             ) : null}
             {notice ? <StatusBanner {...notice} /> : null}
 
-            <View style={[styles.lab, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={styles.labHeader}>
-                <View>
-                  <Text style={[styles.labEyebrow, { color: colors.accentStrong }]}>REVIEWER LAB</Text>
-                  <Text style={[styles.labTitle, { color: colors.ink }]}>Exercise attribution edge cases</Text>
+            <View style={[styles.lab, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
+              <Pressable
+                aria-expanded={labOpen}
+                accessibilityRole="button"
+                accessibilityLabel={labOpen ? 'Hide reviewer controls' : 'Show reviewer controls'}
+                accessibilityState={{ expanded: labOpen }}
+                onBlur={() => setLabFocused(false)}
+                onFocus={() => setLabFocused(true)}
+                onPress={() => setLabOpen((current) => !current)}
+                style={({ pressed }) => [
+                  styles.labHeader,
+                  labFocused && { backgroundColor: colors.accentSoft },
+                  pressed && styles.labHeaderPressed,
+                ]}
+              >
+                <View style={[styles.labIcon, { backgroundColor: colors.accentSoft }]}>
+                  <Feather name="sliders" color={colors.accentStrong} size={18} />
                 </View>
-                <Feather name="sliders" color={colors.inkSubtle} size={20} />
-              </View>
-              <Text style={[styles.labDescription, { color: colors.inkMuted }]}>
-                Direct and deferred controls feed Branch-shaped payloads through the production parser. The deferred control represents the callback received on first launch after installation.
-              </Text>
-              <View style={styles.labButtons}>
-                <Button label="Direct open" icon="corner-down-right" variant="secondary" onPress={() => simulate('direct')} />
-                <Button label="Deferred first launch" icon="download-cloud" variant="secondary" onPress={() => simulate('deferred')} />
-                <Button label="Invalid payload" icon="shield-off" variant="danger" onPress={() => simulate('invalid')} />
-              </View>
-              <View style={[styles.techRow, { borderTopColor: colors.border }]}>
-                <Text style={[styles.techText, { color: colors.inkSubtle }]}>{architectureLabel}</Text>
-                <Text style={[styles.techText, { color: colors.inkSubtle }]}>{Platform.OS} · idempotent milestones</Text>
-              </View>
-              <Button label="Reset test state" icon="refresh-cw" variant="ghost" onPress={() => void reset()} />
+                <View style={styles.labHeadingCopy}>
+                  <Text style={[styles.labEyebrow, { color: colors.accentStrong }]}>REVIEWER CONTROLS</Text>
+                  <Text style={[styles.labTitle, { color: colors.ink }]}>Inspect direct, deferred, and failure paths</Text>
+                </View>
+                <Feather name={labOpen ? 'chevron-up' : 'chevron-down'} color={colors.inkMuted} size={20} />
+              </Pressable>
+
+              {labOpen ? (
+                <AnimatedReveal duration={motion.feedback} distance={8}>
+                  <View style={[styles.labBody, { borderTopColor: colors.border }]}>
+                    {coordinator.integrationMode === 'web-demo' ? (
+                      <StatusBanner
+                        tone="info"
+                        title="Credential-free reviewer build"
+                        message="These controls exercise the production parser and state machine. Native Branch install attribution and Firebase delivery require the documented custom build."
+                      />
+                    ) : null}
+                    <Text style={[styles.labDescription, { color: colors.inkMuted }]}>Direct and deferred controls inject Branch-shaped payloads. The deferred path represents the callback received on first launch after installation.</Text>
+                    <View style={styles.labButtons}>
+                      <Button label="Direct open" icon="corner-down-right" variant="secondary" onPress={() => simulate('direct')} />
+                      <Button label="Deferred first launch" icon="download-cloud" variant="secondary" onPress={() => simulate('deferred')} />
+                      <Button label="Invalid payload" icon="shield-off" variant="danger" onPress={() => simulate('invalid')} />
+                    </View>
+                    <View style={[styles.techRow, { borderTopColor: colors.border }]}>
+                      <Text style={[styles.techText, { color: colors.inkSubtle }]}>{architectureLabel}</Text>
+                      <Text style={[styles.techText, { color: colors.inkSubtle }]}>{Platform.OS} · idempotent milestones</Text>
+                    </View>
+                    <Button label="Reset test state" icon="refresh-cw" variant="ghost" onPress={() => void reset()} />
+                  </View>
+                </AnimatedReveal>
+              ) : null}
             </View>
+
+            {!isWide ? (
+              <View style={styles.mobileTrace}>
+                  <Button
+                    label={mobileTraceOpen ? 'Hide technical trace' : 'View technical trace'}
+                    icon={mobileTraceOpen ? 'chevron-up' : 'activity'}
+                    variant="secondary"
+                    fullWidth
+                    accessibilityState={{ expanded: mobileTraceOpen }}
+                    onPress={() => setMobileTraceOpen((current) => !current)}
+                />
+                {mobileTraceOpen ? (
+                  <AnimatedReveal duration={motion.feedback} distance={8}>
+                    <EventLedger referralCode={referral?.referralCode ?? null} />
+                  </AnimatedReveal>
+                ) : null}
+              </View>
+            ) : null}
           </View>
-          <View style={styles.sideColumn}>
-            <EventLedger />
-          </View>
+
+          {isWide ? (
+            <AnimatedReveal delay={motion.stagger * 3} style={styles.sideColumn}>
+              <EventLedger referralCode={referral?.referralCode ?? null} />
+            </AnimatedReveal>
+          ) : null}
         </View>
       </View>
     </ScreenShell>
@@ -230,35 +309,61 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
 }
 
 const styles = StyleSheet.create({
-  page: { paddingTop: 28, gap: 32 },
+  page: { paddingTop: 42, gap: 36 },
   columns: { flexDirection: 'row', alignItems: 'flex-start', gap: 28 },
   stacked: { flexDirection: 'column' },
-  mainColumn: { flex: 1.65, minWidth: 0, gap: 16 },
-  sideColumn: { flex: 1, minWidth: 280, width: '100%' },
-  identity: { borderWidth: 1, borderRadius: radii.md, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  avatar: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 13, fontWeight: '800' },
-  identityCopy: { flex: 1 },
-  signedIn: { fontSize: 9, lineHeight: 13, fontWeight: '800', letterSpacing: 1 },
-  userName: { marginTop: 2, fontSize: 14, lineHeight: 19, fontWeight: '700' },
-  pass: { minHeight: 264, borderRadius: radii.lg, padding: 24, justifyContent: 'space-between', overflow: 'hidden' },
-  passGlow: { position: 'absolute', width: 220, height: 220, borderRadius: 110, right: -65, top: -82, backgroundColor: 'rgba(184,161,255,0.16)' },
-  passTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  passEyebrow: { color: '#CDBFFF', fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.3 },
-  passTitle: { color: '#FFFFFF', marginTop: 6, fontSize: 22, lineHeight: 28, fontWeight: '700' },
-  passIcon: { width: 44, height: 44, borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
-  codeLabel: { color: '#CDBFFF', fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.2 },
-  code: { color: '#FFFFFF', marginTop: 5, fontSize: 30, lineHeight: 38, fontWeight: '800', letterSpacing: 2 },
-  passFinePrint: { color: 'rgba(255,255,255,0.67)', fontSize: 10, lineHeight: 15 },
-  buttonRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  linkBox: { borderRadius: radii.md, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  link: { flex: 1, fontSize: 12, lineHeight: 18 },
-  lab: { borderWidth: 1, borderRadius: radii.lg, padding: 22, gap: 16 },
-  labHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  labEyebrow: { fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.1 },
-  labTitle: { marginTop: 3, fontSize: 18, lineHeight: 24, fontWeight: '700' },
-  labDescription: { fontSize: 13, lineHeight: 20 },
-  labButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
+  mainColumn: { flex: 1.72, minWidth: 0, width: '100%', gap: 16 },
+  sideColumn: { flex: 0.88, minWidth: 300, width: '100%' },
+  heroCard: {
+    borderWidth: 1,
+    borderRadius: radii.xl,
+    padding: 28,
+    overflow: 'hidden',
+    shadowColor: '#33215D',
+    shadowOpacity: 0.12,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 6,
+  },
+  heroLayout: { flexDirection: 'row', alignItems: 'center', gap: 24 },
+  heroStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  heroCopy: { flex: 1.2, minWidth: 0, gap: 22, alignItems: 'flex-start' },
+  memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  avatar: { width: 46, height: 46, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  avatarText: { fontFamily: typography.family, fontSize: 14, fontWeight: '800' },
+  memberCopy: { flex: 1 },
+  verifiedRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  verified: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 0.9 },
+  memberName: { marginTop: 2, fontFamily: typography.family, fontSize: 15, lineHeight: 21, fontWeight: '700' },
+  heroEyebrow: { fontFamily: typography.family, fontSize: 11, lineHeight: 15, fontWeight: '800', letterSpacing: 1.1 },
+  heroTitle: { marginTop: 7, fontFamily: typography.family, fontSize: 29, lineHeight: 35, fontWeight: '800', letterSpacing: -0.8 },
+  heroDescription: { marginTop: 9, maxWidth: 520, fontFamily: typography.family, fontSize: 15, lineHeight: 23 },
+  codePanel: { width: '100%', borderWidth: 1, borderRadius: radii.lg, padding: 17, gap: 7 },
+  codeHeading: { minHeight: 22, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  codeLabel: { fontFamily: typography.family, fontSize: 11, lineHeight: 15, fontWeight: '800', letterSpacing: 1.05 },
+  code: { flexShrink: 1, fontFamily: typography.mono, fontSize: 27, lineHeight: 34, fontWeight: '700', letterSpacing: 1.2 },
+  readyPill: { minHeight: 24, borderRadius: radii.pill, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  readyDot: { width: 6, height: 6, borderRadius: 3 },
+  readyText: { fontFamily: typography.family, fontSize: 9, lineHeight: 12, fontWeight: '800', letterSpacing: 0.8 },
+  orbitStage: { flex: 0.85, minWidth: 268, alignItems: 'center', justifyContent: 'center', gap: 5 },
+  orbitStageCompact: { minWidth: 0, width: '100%', paddingTop: 2 },
+  orbitCaption: { maxWidth: 240, textAlign: 'center', fontFamily: typography.family, fontSize: 12, lineHeight: 18, fontWeight: '600' },
+  linkBox: { borderWidth: 1, borderRadius: radii.lg, padding: 15, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  linkIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  linkCopy: { flex: 1, gap: 2 },
+  linkLabel: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 0.95 },
+  link: { fontFamily: typography.family, fontSize: 13, lineHeight: 19 },
+  lab: { borderWidth: 1, borderRadius: radii.lg, overflow: 'hidden' },
+  labHeader: { minHeight: 76, paddingHorizontal: 18, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12, cursor: Platform.OS === 'web' ? 'pointer' : undefined },
+  labHeaderPressed: { opacity: 0.72 },
+  labIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  labHeadingCopy: { flex: 1 },
+  labEyebrow: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05 },
+  labTitle: { marginTop: 3, fontFamily: typography.family, fontSize: 16, lineHeight: 22, fontWeight: '700' },
+  labBody: { borderTopWidth: 1, padding: 18, gap: 16 },
+  labDescription: { fontFamily: typography.family, fontSize: 14, lineHeight: 22 },
+  labButtons: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   techRow: { borderTopWidth: 1, paddingTop: 14, flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', gap: 8 },
-  techText: { fontSize: 10, lineHeight: 15, fontWeight: '600' },
+  techText: { fontFamily: typography.family, fontSize: 11, lineHeight: 16, fontWeight: '600' },
+  mobileTrace: { gap: 12 },
 });

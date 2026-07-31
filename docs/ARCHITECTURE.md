@@ -313,9 +313,10 @@ If exact reporting matters, export to BigQuery and deduplicate by `event_id`, or
 - **Domain tests:** code format, attribution parsing, Branch flag interpretation, invalid and oversized inputs.
 - **Coordinator tests:** persistence-before-routing, direct/deferred intake, duplicate replay, multiple links, frozen attribution, completion clearing, and analytics retryability.
 - **Analytics contract tests:** all five required events contain `referral_code`, `platform`, `event_id`, `flow_id`, and `schema_version`.
+- **Progress-integrity tests:** milestones from different referral codes, failed deliveries, duplicates, and diagnostic events cannot combine into a false 5/5 journey.
 - **Adapter tests:** Branch/Firebase fakes assert real method shapes without requiring network credentials.
 
-Loading, sharing, invalid-link, onboarding, and completed UI states were also exercised manually in the deployed reviewer build. Automated component/accessibility coverage is a production follow-up.
+Loading, sharing, invalid-link, onboarding, and completed UI states were also exercised manually in the reviewer build. Responsive checks covered 375 x 812, 812 x 375, and 1440 x 1000 layouts in light and dark themes. Browser reduced-motion emulation verified immediate content visibility, static state indicators, and disabled route animation. Automated component/accessibility coverage remains a production follow-up.
 
 The repository verification gate is:
 

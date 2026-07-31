@@ -1,11 +1,17 @@
 import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useMemo, useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
+import { getAcceptedReferralMilestones } from '../application/referralProgress';
 import { useReferralRuntime } from '../application/ReferralRuntime';
 import { Button } from '../components/Button';
 import { EventLedger } from '../components/EventLedger';
+import { ReferralOrbit } from '../components/ReferralOrbit';
 import { ScreenShell } from '../components/ScreenShell';
-import { radii, useAppTheme } from '../theme/theme';
+import { REQUIRED_REFERRAL_EVENTS } from '../domain/analytics';
+import { AnimatedReveal } from '../motion/AnimatedReveal';
+import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 import type { RootStackParamList } from '../navigation/types';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -14,10 +20,16 @@ type Props = NativeStackScreenProps<RootStackParamList, 'Success'>;
 
 export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
   const { accountId, referralCode } = route.params;
-  const { colors } = useAppTheme();
+  const { colors, isDark } = useAppTheme();
   const { width } = useWindowDimensions();
-  const isWide = width >= 880;
-  const { coordinator, clearLedger } = useReferralRuntime();
+  const isWide = width >= 1200;
+  const compact = width < 520;
+  const { coordinator, clearLedger, events } = useReferralRuntime();
+  const [mobileTraceOpen, setMobileTraceOpen] = useState(false);
+  const completedSteps = useMemo(
+    () => getAcceptedReferralMilestones(events, referralCode).size,
+    [events, referralCode],
+  );
 
   const restart = async () => {
     await coordinator.resetDemoState();
@@ -30,68 +42,126 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
       <View style={styles.page}>
         <View style={[styles.columns, !isWide && styles.stacked]}>
           <View style={styles.mainColumn}>
-            <View style={[styles.successCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <View style={[styles.successIcon, { backgroundColor: colors.successSoft }]}>
-                <Feather name="check" color={colors.success} size={34} />
-              </View>
-              <Text style={[styles.eyebrow, { color: colors.success }]}>ATTRIBUTED SIGNUP COMPLETE</Text>
-              <Text accessibilityRole="header" style={[styles.title, { color: colors.ink }]}>The full referral loop is closed.</Text>
-              <Text style={[styles.description, { color: colors.inkMuted }]}>
-                The mock account was created only after the frozen referral code was accepted. The completion event now carries the same flow identity as the original click.
-              </Text>
+            <AnimatedReveal variant="scale">
+              <LinearGradient
+                colors={
+                  isDark
+                    ? ['#241A35', '#171827', '#142A32']
+                    : ['#F8EEFF', '#E9EEFF', '#E4F6F4']
+                }
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[styles.successCard, { borderColor: colors.border }]}
+              >
+                <ReferralOrbit
+                  activeSteps={completedSteps}
+                  size={compact ? 200 : 238}
+                  success={completedSteps === REQUIRED_REFERRAL_EVENTS.length}
+                />
+                <AnimatedReveal delay={motion.stagger}>
+                  <View style={[styles.completePill, { backgroundColor: colors.successSoft }]}>
+                    <Feather name="check-circle" color={colors.success} size={15} />
+                    <Text style={[styles.completePillText, { color: colors.success }]}>ATTRIBUTED SIGNUP COMPLETE</Text>
+                  </View>
+                </AnimatedReveal>
+                <AnimatedReveal delay={motion.stagger * 2}>
+                  <Text accessibilityRole="header" style={[styles.title, compact && styles.titleCompact, { color: colors.ink }]}>The referral loop is complete.</Text>
+                </AnimatedReveal>
+                <AnimatedReveal delay={motion.stagger * 3}>
+                  <Text style={[styles.description, { color: colors.inkMuted }]}>The signup completed with the same protected referral identity that arrived on the original link.</Text>
+                </AnimatedReveal>
 
-              <View style={[styles.receipt, { backgroundColor: colors.surfaceMuted }]}>
-                <ReceiptRow label="Referral code" value={referralCode} />
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                <ReceiptRow label="Demo account" value={accountId} />
-                <View style={[styles.divider, { backgroundColor: colors.border }]} />
-                <ReceiptRow label="Reward status" value="Server validation queued" />
-              </View>
+                <View style={[styles.receipt, { backgroundColor: colors.surfaceGlass, borderColor: colors.borderStrong }]}>
+                  <ReceiptRow compact={compact} label="Referral code" value={referralCode} />
+                  <View style={[styles.divider, { backgroundColor: colors.border }]} />
+                  <ReceiptRow compact={compact} label="Demo account" value={accountId} />
+                  <View style={[styles.divider, { backgroundColor: colors.border }]} />
+                  <ReceiptRow compact={compact} label="Reward status" value="Validation queued" />
+                </View>
 
-              <View style={[styles.note, { backgroundColor: colors.accentSoft }]}>
-                <Feather name="server" color={colors.accentStrong} size={18} />
-                <Text style={[styles.noteText, { color: colors.inkMuted }]}>
-                  In production, reward issuance belongs to an idempotent backend ledger—not the mobile client.
-                </Text>
+                <View style={[styles.note, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
+                  <View style={[styles.noteIcon, { backgroundColor: colors.accentSoft }]}>
+                    <Feather name="server" color={colors.accentStrong} size={17} />
+                  </View>
+                  <Text style={[styles.noteText, { color: colors.inkMuted }]}>Production rewards belong to an idempotent backend ledger—not the mobile client.</Text>
+                </View>
+                <Button label="Run the flow again" icon="refresh-cw" fullWidth onPress={() => void restart()} />
+              </LinearGradient>
+            </AnimatedReveal>
+
+            {!isWide ? (
+              <View style={styles.mobileTrace}>
+                <Button
+                  label={mobileTraceOpen ? 'Hide technical trace' : 'View completed trace'}
+                  icon={mobileTraceOpen ? 'chevron-up' : 'activity'}
+                  variant="secondary"
+                  fullWidth
+                  accessibilityState={{ expanded: mobileTraceOpen }}
+                  onPress={() => setMobileTraceOpen((current) => !current)}
+                />
+                {mobileTraceOpen ? (
+                  <AnimatedReveal duration={motion.feedback} distance={8}>
+                    <EventLedger referralCode={referralCode} />
+                  </AnimatedReveal>
+                ) : null}
               </View>
-              <Button label="Run the flow again" icon="refresh-cw" fullWidth onPress={() => void restart()} />
-            </View>
+            ) : null}
           </View>
-          <View style={styles.sideColumn}>
-            <EventLedger />
-          </View>
+
+          {isWide ? (
+            <AnimatedReveal delay={motion.stagger * 2} style={styles.sideColumn}>
+              <EventLedger referralCode={referralCode} />
+            </AnimatedReveal>
+          ) : null}
         </View>
       </View>
     </ScreenShell>
   );
 }
 
-function ReceiptRow({ label, value }: { label: string; value: string }): React.JSX.Element {
+function ReceiptRow({ label, value, compact }: { label: string; value: string; compact: boolean }): React.JSX.Element {
   const { colors } = useAppTheme();
   return (
-    <View style={styles.receiptRow}>
+    <View style={[styles.receiptRow, compact && styles.receiptRowCompact]}>
       <Text style={[styles.receiptLabel, { color: colors.inkSubtle }]}>{label}</Text>
-      <Text selectable style={[styles.receiptValue, { color: colors.ink }]}>{value}</Text>
+      <Text selectable style={[styles.receiptValue, compact && styles.receiptValueCompact, { color: colors.ink }]}>{value}</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  page: { paddingTop: 52 },
+  page: { paddingTop: 44 },
   columns: { flexDirection: 'row', alignItems: 'flex-start', gap: 28 },
   stacked: { flexDirection: 'column' },
-  mainColumn: { flex: 1.65, minWidth: 0 },
-  sideColumn: { flex: 1, minWidth: 280, width: '100%' },
-  successCard: { borderWidth: 1, borderRadius: radii.lg, padding: 30, alignItems: 'center', gap: 16 },
-  successIcon: { width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 3 },
-  eyebrow: { fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.2, textAlign: 'center' },
-  title: { maxWidth: 520, textAlign: 'center', fontSize: 34, lineHeight: 40, fontWeight: '800', letterSpacing: -1.1 },
-  description: { maxWidth: 540, textAlign: 'center', fontSize: 14, lineHeight: 22 },
-  receipt: { width: '100%', borderRadius: radii.md, padding: 17, gap: 12, marginTop: 6 },
-  receiptRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 16 },
-  receiptLabel: { fontSize: 11, lineHeight: 17 },
-  receiptValue: { flexShrink: 1, textAlign: 'right', fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  mainColumn: { flex: 1.72, minWidth: 0, width: '100%', gap: 14 },
+  sideColumn: { flex: 0.88, minWidth: 300, width: '100%' },
+  successCard: {
+    borderWidth: 1,
+    borderRadius: radii.xl,
+    padding: 30,
+    alignItems: 'center',
+    gap: 17,
+    overflow: 'hidden',
+    shadowColor: '#32205B',
+    shadowOpacity: 0.12,
+    shadowRadius: 28,
+    shadowOffset: { width: 0, height: 18 },
+    elevation: 6,
+  },
+  completePill: { maxWidth: '100%', minHeight: 34, borderRadius: radii.pill, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  completePillText: { flexShrink: 1, textAlign: 'center', fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1.05 },
+  title: { maxWidth: 580, textAlign: 'center', fontFamily: typography.family, fontSize: 40, lineHeight: 46, fontWeight: '800', letterSpacing: -1.25 },
+  titleCompact: { fontSize: 32, lineHeight: 38, letterSpacing: -0.85 },
+  description: { maxWidth: 560, textAlign: 'center', fontFamily: typography.family, fontSize: 16, lineHeight: 25 },
+  receipt: { width: '100%', borderWidth: 1, borderRadius: radii.lg, padding: 18, gap: 13, marginTop: 3 },
+  receiptRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 18 },
+  receiptRowCompact: { flexDirection: 'column', gap: 3 },
+  receiptLabel: { fontFamily: typography.family, fontSize: 13, lineHeight: 19 },
+  receiptValue: { flexShrink: 1, textAlign: 'right', fontFamily: typography.mono, fontSize: 13, lineHeight: 19, fontWeight: '700' },
+  receiptValueCompact: { textAlign: 'left' },
   divider: { height: StyleSheet.hairlineWidth },
-  note: { width: '100%', borderRadius: radii.md, padding: 15, flexDirection: 'row', gap: 11, alignItems: 'flex-start' },
-  noteText: { flex: 1, fontSize: 12, lineHeight: 18 },
+  note: { width: '100%', borderWidth: 1, borderRadius: radii.lg, padding: 15, flexDirection: 'row', gap: 12, alignItems: 'center' },
+  noteIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  noteText: { flex: 1, fontFamily: typography.family, fontSize: 13, lineHeight: 20 },
+  mobileTrace: { gap: 12 },
 });

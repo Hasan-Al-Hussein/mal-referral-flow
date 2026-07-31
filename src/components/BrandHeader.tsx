@@ -1,37 +1,76 @@
 import { Feather } from '@expo/vector-icons';
-import { Platform, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Image, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
-import { radii, useAppTheme } from '../theme/theme';
+import { radii, typography, useAppTheme } from '../theme/theme';
 
 interface BrandHeaderProps {
   integrationMode: 'native' | 'web-demo';
 }
 
 export function BrandHeader({ integrationMode }: BrandHeaderProps): React.JSX.Element {
-  const { colors } = useAppTheme();
+  const { colors, isDark, toggleTheme } = useAppTheme();
+  const { width } = useWindowDimensions();
+  const [themeFocused, setThemeFocused] = useState(false);
+  const isCompact = width < 620;
   const isDemo = integrationMode === 'web-demo';
+
   return (
     <View style={[styles.header, { borderBottomColor: colors.border }]}>
       <View style={styles.brandRow}>
-        <View style={[styles.logo, { backgroundColor: colors.accent }]}>
-          <Feather name="link-2" size={19} color={colors.white} />
+        <View style={[styles.logoTile, { backgroundColor: colors.brandMist }]}>
+          <Image
+            accessibilityLabel="Mal"
+            resizeMode="contain"
+            source={require('../../assets/mal-brand-lockup.png')}
+            style={styles.logo}
+          />
         </View>
-        <View>
-          <Text style={[styles.brand, { color: colors.ink }]}>Mal</Text>
-          <Text style={[styles.subbrand, { color: colors.inkSubtle }]}>Referral prototype</Text>
-        </View>
+        {!isCompact ? (
+          <>
+            <View style={[styles.divider, { backgroundColor: colors.borderStrong }]} />
+            <View>
+              <Text style={[styles.productName, { color: colors.ink }]}>Referral flow</Text>
+              <Text style={[styles.productMeta, { color: colors.inkSubtle }]}>Growth engineering prototype</Text>
+            </View>
+          </>
+        ) : null}
       </View>
-      <View
-        accessibilityLabel={isDemo ? 'Web reviewer simulation' : 'Native SDK mode'}
-        style={[
-          styles.mode,
-          { backgroundColor: isDemo ? colors.accentSoft : colors.successSoft },
-        ]}
-      >
-        <View style={[styles.dot, { backgroundColor: isDemo ? colors.accent : colors.success }]} />
-        <Text style={[styles.modeText, { color: isDemo ? colors.accentStrong : colors.success }]}>
-          {isDemo ? `${Platform.OS.toUpperCase()} REVIEW MODE` : 'NATIVE SDK MODE'}
-        </Text>
+
+      <View style={styles.actions}>
+        <View
+          accessibilityLabel={isDemo ? 'Web reviewer simulation' : 'Native SDK mode'}
+          style={[
+            styles.mode,
+            {
+              backgroundColor: isDemo ? colors.surfaceGlass : colors.successSoft,
+              borderColor: isDemo ? colors.border : colors.success,
+            },
+          ]}
+        >
+          <View style={[styles.dot, { backgroundColor: isDemo ? colors.accent : colors.success }]} />
+          <Text style={[styles.modeText, { color: isDemo ? colors.inkMuted : colors.success }]}>
+            {isDemo ? (isCompact ? 'REVIEW' : `${Platform.OS.toUpperCase()} REVIEW`) : 'NATIVE SDK'}
+          </Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Switch to ${isDark ? 'light' : 'dark'} theme`}
+          hitSlop={4}
+          onBlur={() => setThemeFocused(false)}
+          onFocus={() => setThemeFocused(true)}
+          onPress={toggleTheme}
+          style={({ pressed }) => [
+            styles.themeButton,
+            {
+              backgroundColor: colors.surfaceGlass,
+              borderColor: themeFocused ? colors.accent : colors.border,
+              opacity: pressed ? 0.72 : 1,
+            },
+          ]}
+        >
+          <Feather name={isDark ? 'sun' : 'moon'} size={17} color={colors.ink} />
+        </Pressable>
       </View>
     </View>
   );
@@ -39,27 +78,44 @@ export function BrandHeader({ integrationMode }: BrandHeaderProps): React.JSX.El
 
 const styles = StyleSheet.create({
   header: {
-    minHeight: 76,
+    minHeight: 82,
     width: '100%',
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 16,
-    paddingVertical: 12,
+    gap: 12,
+    paddingVertical: 14,
   },
-  brandRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
-  logo: {
-    width: 38,
-    height: 38,
-    borderRadius: 13,
+  brandRow: { flexDirection: 'row', alignItems: 'center', flexShrink: 1, gap: 13 },
+  logoTile: {
+    width: 116,
+    height: 49,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  brand: { fontSize: 19, lineHeight: 21, fontWeight: '800', letterSpacing: -0.4 },
-  subbrand: { fontSize: 11, lineHeight: 15, fontWeight: '500' },
+  logo: { width: 110, height: 47 },
+  divider: { width: StyleSheet.hairlineWidth, height: 32 },
+  productName: {
+    fontFamily: typography.family,
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '700',
+    letterSpacing: -0.1,
+  },
+  productMeta: {
+    marginTop: 2,
+    fontFamily: typography.family,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '500',
+  },
+  actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   mode: {
-    minHeight: 30,
+    minHeight: 34,
+    borderWidth: 1,
     borderRadius: radii.pill,
     paddingHorizontal: 11,
     flexDirection: 'row',
@@ -67,5 +123,20 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   dot: { width: 7, height: 7, borderRadius: 4 },
-  modeText: { fontSize: 10, lineHeight: 13, fontWeight: '800', letterSpacing: 0.7 },
+  modeText: {
+    fontFamily: typography.family,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+  themeButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: Platform.OS === 'web' ? 'pointer' : undefined,
+  },
 });
