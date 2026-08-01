@@ -1,4 +1,5 @@
 import {
+  isLoopbackReviewerUrl,
   isShareableReferralUrl,
   isValidReferralCode,
   normalizeReferralCode,
@@ -303,7 +304,9 @@ export class ReferralCoordinator {
         lifecycle,
         'Branch link generation',
       );
-      if (!isShareableReferralUrl(url)) {
+      const isReviewerLoopbackUrl =
+        this.deepLinks.mode === 'web-demo' && isLoopbackReviewerUrl(url);
+      if (!isShareableReferralUrl(url) && !isReviewerLoopbackUrl) {
         failureReason = 'invalid_generated_url';
         throw new Error('Link provider returned an unusable URL.');
       }

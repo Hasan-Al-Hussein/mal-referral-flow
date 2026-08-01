@@ -30,7 +30,7 @@ The credential-free web path requires no sign-in, Branch account, Firebase proje
 1. Open the live web URL above, or run the project locally with `npm ci && npm run web`.
 2. Select **Generate my referral link**. A stable code for the current demo epoch and a shareable review URL are produced; `referral_link_generated` appears in the event ledger.
 3. Select **Share my invitation**. A supported browser opens Web Share; otherwise the full invite is copied. The ledger records the actual outcome rather than assuming success.
-4. Select **Direct open**. The Branch-shaped payload passes through the production parser and coordinator, then opens onboarding with the referral code visible and locked.
+4. Select **Simulate direct callback**. The Branch-shaped payload passes through the production parser and coordinator, then opens onboarding with the referral code visible and locked.
 5. Enter a name and email, then select **Create demo account**. The persisted attribution identity is frozen when signup starts and completion is emitted only after the mock endpoint accepts it.
 6. Select **Run the flow again**. The app clears persisted and visible journey state, remounts a fresh Invite screen at `0/5`, and restores **Generate my referral link**. Generate, share, then open **Reviewer controls** and select **Simulate deferred callback**; onboarding should open at `3/5` and completion should reach `5/5` for that combined reviewer journey. To inspect the invitee device in isolation, reset once more and select **Simulate deferred callback** without generating or sharing first; onboarding truthfully begins at `1/5 · Click` because the first two milestones occurred on the referrer's device. Both paths use `+is_first_session=true` and are labeled `demo-deferred`.
 7. Select **Invalid payload** to verify safe rejection and the failure events without unintended navigation.
@@ -356,8 +356,8 @@ Keep unauthenticated access to internal builds enabled, test the resulting URL i
 
 | Case | How to exercise | Expected result | Evidence level |
 | --- | --- | --- | --- |
-| Web direct fixture | Select **Direct open** or load a URL without `deferred=1` | Accepted as `demo-direct`; onboarding opens with the normalized code | Interactive now |
-| Web deferred fixture | Select **Deferred first launch** or load a URL with `deferred=1` | Accepted as `demo-deferred`; onboarding opens with the code pre-applied | Interactive simulation, not install proof |
+| Web direct fixture | Select **Simulate direct callback** or load a URL without `deferred=1` | Accepted as `demo-direct`; onboarding opens with the normalized code | Interactive now |
+| Web deferred fixture | Select **Simulate deferred callback** or load a URL with `deferred=1` | Accepted as `demo-deferred`; onboarding opens with the code pre-applied | Interactive simulation, not install proof |
 | Web malformed input | Select **Invalid payload** | No navigation; resolution failure and code rejection are visible | Interactive now |
 | Web signup failure | Submit an email containing `+fail` | Signup remains retryable; `referral_signup_failed` is visible | Interactive now |
 | Exact callback replay | Open the same URL, including `click_ts`, more than once | Fingerprint is already processed; duplicate side effects are suppressed | Application-level proof |

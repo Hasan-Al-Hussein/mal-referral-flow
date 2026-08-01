@@ -35,7 +35,7 @@ This audit traces the assessment from baseline `651293d711668300414ae7e228c28d29
 | Requirement | Evidence | Proof level |
 | --- | --- | --- |
 | Expo React Native choice justified | Pinned Expo/React Native dependencies, custom-development-build rationale, Expo Doctor, web export | Repository/config proof; native compile external |
-| Authenticated referrer generates unique shareable link and invokes native share | Auth-required generation, stable per-epoch mock code, HTTPS validation, Branch payload adapter, `Share.share` outcome adapter | Fixture/call-shape proof; global uniqueness and device sheet external |
+| Authenticated referrer generates unique shareable link and invokes native share | Auth-required generation, stable per-epoch mock code, HTTPS enforcement for native providers, loopback-only HTTP for the local reviewer build, Branch payload adapter, `Share.share` outcome adapter | Fixture/call-shape proof; global uniqueness and device sheet external |
 | Direct incoming link routes with pre-applied code | Strict Branch-shaped parser, persist-before-route coordinator, warm/cold route tests | Application proof; App/Universal Link association external |
 | Deferred link survives install and first launch | Same accepted callback path, first-session metadata, pending persistence, cold restore, `demo-deferred` web fixture | Post-callback application proof only; store handoff external |
 | Branch rather than Firebase Dynamic Links | Branch native adapter and test/live plugin config; architecture records Dynamic Links shutdown rationale | Source/config proof; provider project external |

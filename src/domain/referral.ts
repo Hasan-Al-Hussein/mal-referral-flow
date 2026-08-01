@@ -57,10 +57,20 @@ export function referralCodeForTelemetry(value: unknown): string {
 export function isShareableReferralUrl(value: unknown): value is string {
   if (typeof value !== 'string' || !value.trim()) return false;
   try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+export function isLoopbackReviewerUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || !value.trim()) return false;
+  try {
     const url = new URL(value);
-    if (url.protocol === 'https:') return true;
-    if (url.protocol !== 'http:') return false;
-    return ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    return (
+      url.protocol === 'http:' &&
+      ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+    );
   } catch {
     return false;
   }

@@ -20,7 +20,7 @@ function getShareNotice(result: ShareResult): ShareNotice {
       message:
         result.channel === 'clipboard'
           ? 'Web Share is unavailable here, so the complete invite was copied to your clipboard.'
-          : 'The shared milestone was recorded only after the share action completed.',
+          : 'The share action completed successfully.',
     };
   }
 

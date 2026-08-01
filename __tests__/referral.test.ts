@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import * as Crypto from 'expo-crypto';
 
 import {
+  isLoopbackReviewerUrl,
   isShareableReferralUrl,
   parseStoredReferralAttribution,
   REFERRAL_DESTINATION,
@@ -311,8 +312,14 @@ describe('shareable referral URLs', () => {
     'http://localhost:8765/?referral_code=MAL-ABCD2345',
     'http://127.0.0.1:4173/?referral_code=MAL-ABCD2345',
     'http://[::1]:19006/?referral_code=MAL-ABCD2345',
-  ])('accepts loopback HTTP links for local reviewer builds: %s', (value) => {
-    expect(isShareableReferralUrl(value)).toBe(true);
+  ])('classifies loopback HTTP links only as local reviewer URLs: %s', (value) => {
+    expect(isShareableReferralUrl(value)).toBe(false);
+    expect(isLoopbackReviewerUrl(value)).toBe(true);
+  });
+
+  it('does not classify lookalike or non-HTTP hosts as loopback reviewer URLs', () => {
+    expect(isLoopbackReviewerUrl('http://localhost.example/referral')).toBe(false);
+    expect(isLoopbackReviewerUrl('https://localhost/referral')).toBe(false);
   });
 
   it.each(['', 'not a URL', 'http://insecure.example/r/code', 'malreferral://onboarding'])(

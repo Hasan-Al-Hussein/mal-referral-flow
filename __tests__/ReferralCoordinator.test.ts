@@ -262,13 +262,17 @@ class MemoryAnalyticsClient implements AnalyticsClient {
 }
 
 class FakeDeepLinkService implements DeepLinkService {
-  readonly mode = 'web-demo' as const;
+  readonly mode: DeepLinkService['mode'];
   createError: Error | undefined;
   createdUrl: string | undefined;
   subscribeError: Error | undefined;
   subscribeCalls = 0;
   unsubscribeCalls = 0;
   private listener: ((event: RawDeepLinkEvent) => void) | undefined;
+
+  constructor(mode: DeepLinkService['mode'] = 'web-demo') {
+    this.mode = mode;
+  }
 
   async createReferralLink(referralCode: string): Promise<string> {
     if (this.createError) throw this.createError;
@@ -359,6 +363,7 @@ function createHarness(
   timeoutMs = 10_000,
   createEventId?: () => string,
   existingStorage?: MemoryStorage,
+  deepLinkMode: DeepLinkService['mode'] = 'web-demo',
 ): Harness {
   const operations: string[] = [];
   const storage = existingStorage ?? new MemoryStorage(operations);
@@ -375,7 +380,7 @@ function createHarness(
     }),
     timeoutMs,
   );
-  const deepLinks = new FakeDeepLinkService();
+  const deepLinks = new FakeDeepLinkService(deepLinkMode);
   const referralApi = new FakeReferralApi(storage);
   const shareService = new FakeShareService();
   const coordinator = new ReferralCoordinator(
@@ -1193,6 +1198,31 @@ describe('ReferralCoordinator', () => {
         ({ properties }) => properties.reason,
       ),
     ).toEqual(['authentication_required', 'invalid_generated_url']);
+  });
+
+  it('accepts loopback HTTP only for the credential-free web reviewer adapter', async () => {
+    const webHarness = createHarness();
+    webHarness.deepLinks.createdUrl = 'http://localhost:8765/referral';
+
+    await expect(
+      webHarness.coordinator.generateReferral('authenticated-web-user'),
+    ).resolves.toEqual({
+      referralCode: expect.stringMatching(/^MAL-/),
+      url: 'http://localhost:8765/referral',
+    });
+    expect(eventsNamed(webHarness.analyticsClient, 'referral_link_generated')).toHaveLength(1);
+
+    const nativeHarness = createHarness(10_000, undefined, undefined, 'native');
+    nativeHarness.deepLinks.createdUrl = 'http://localhost:8765/referral';
+
+    await expect(
+      nativeHarness.coordinator.generateReferral('authenticated-native-user'),
+    ).rejects.toThrow('unusable URL');
+    expect(eventsNamed(nativeHarness.analyticsClient, 'referral_link_generated')).toHaveLength(0);
+    expect(
+      eventsNamed(nativeHarness.analyticsClient, 'referral_link_generation_failed')[0]?.properties
+        .reason,
+    ).toBe('invalid_generated_url');
   });
 
   it('coalesces concurrent generation for the same authenticated member', async () => {

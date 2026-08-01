@@ -94,7 +94,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
       setNotice({
         tone: 'success',
         title: 'Your referral link is ready',
-        message: 'It is stable for this demo member and the generation milestone was recorded exactly once.',
+        message: 'It is stable for this demo member and ready to share.',
       });
     } catch (error) {
       setNotice({
@@ -324,9 +324,9 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
                         : 'Direct and deferred controls use the same link parser. The deferred path represents the callback received on first launch after installation.'}
                     </Text>
                     <View style={styles.labButtons}>
-                      <Button label="Direct open" icon="corner-down-right" variant="secondary" disabled={isGenerating || isSharing || isResetting} onPress={() => simulate('direct')} />
+                      <Button label="Simulate direct callback" icon="corner-down-right" variant="secondary" disabled={isGenerating || isSharing || isResetting} onPress={() => simulate('direct')} />
                       <Button
-                        label={coordinator.integrationMode === 'web-demo' ? 'Simulate deferred callback' : 'Deferred first launch'}
+                        label="Simulate deferred callback"
                         icon="download-cloud"
                         variant="secondary"
                         disabled={isGenerating || isSharing || isResetting}

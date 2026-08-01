@@ -43,8 +43,8 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
   const isWide = width >= 1200;
   const arrivalWide = width >= 650;
   const { coordinator, events } = useReferralRuntime();
-  const isSimulatedDeferred =
-    Platform.OS === 'web' && attribution.kind === 'demo-deferred';
+  const isReviewerFixture = attribution.kind.startsWith('demo-');
+  const isSimulatedDeferred = attribution.kind === 'demo-deferred';
   const [hasStarted, setHasStarted] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [email, setEmail] = useState('');
@@ -73,6 +73,18 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
     : includesGeneratedMilestone
       ? 'Partial reviewer journey: create and click are preserved; share was not accepted, so onboarding begins at 2/5.'
       : 'Standalone invitee trace: 1/5 is correct because create and share occur on the referrer’s device.';
+  const introEyebrow = isSimulatedDeferred
+    ? 'SIMULATED FIRST-LAUNCH CALLBACK'
+    : isReviewerFixture
+      ? 'SIMULATED DIRECT-LINK CALLBACK'
+      : attribution.kind.includes('deferred')
+        ? 'FIRST-LAUNCH ATTRIBUTION'
+        : 'REFERRED ONBOARDING';
+  const introDescription = isReviewerFixture
+    ? isSimulatedDeferred
+      ? 'This reviewer fixture validates and persists a deferred-shaped callback before onboarding.'
+      : 'This reviewer fixture validates and persists a direct-link callback before onboarding.'
+    : 'The referral was validated and saved before this screen opened, so the right invitation stays attached throughout signup.';
   const formHasError = Boolean(fieldErrors.firstName || fieldErrors.email || serverError);
 
   useEffect(() => {
@@ -143,19 +155,9 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
             style={styles.backButton}
           />
           <PageIntro
-            eyebrow={
-              isSimulatedDeferred
-                ? 'SIMULATED FIRST-LAUNCH CALLBACK'
-                : attribution.kind.includes('deferred')
-                  ? 'FIRST-LAUNCH ATTRIBUTION'
-                  : 'REFERRED ONBOARDING'
-            }
+            eyebrow={introEyebrow}
             title="Your invitation found you."
-            description={
-              isSimulatedDeferred
-                ? 'This web reviewer fixture validates and persists a deferred-shaped callback before onboarding.'
-                : 'The referral was validated and saved before this screen opened, so the right invitation stays attached throughout signup.'
-            }
+            description={introDescription}
           />
 
           <View style={[styles.columns, !isWide && styles.stacked]}>
@@ -181,9 +183,9 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                         <Text style={[styles.arrivalMeta, { color: colors.inkMuted }]}>{attribution.kind.replace('-', ' ')} · destination verified</Text>
                       </View>
                     </View>
-                    {isSimulatedDeferred ? (
+                    {isReviewerFixture ? (
                       <View
-                        accessibilityLabel="Reviewer fixture. No app-store install occurred."
+                        accessibilityLabel="Reviewer fixture. No external provider handoff occurred."
                         style={[
                           styles.fixtureBadge,
                           { backgroundColor: colors.accentSoft, borderColor: colors.accent },
@@ -191,7 +193,7 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                       >
                         <Feather name="monitor" color={colors.accentStrong} size={14} />
                         <Text style={[styles.fixtureBadgeText, { color: colors.accentStrong }]}>
-                          REVIEWER FIXTURE · NO APP-STORE INSTALL
+                          REVIEWER FIXTURE · NO PROVIDER HANDOFF
                         </Text>
                       </View>
                     ) : null}

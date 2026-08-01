@@ -20,7 +20,7 @@ describe('referral share UI orchestration', () => {
       expected: {
         tone: 'success',
         title: 'Share sheet opened',
-        message: 'The shared milestone was recorded only after the share action completed.',
+        message: 'The share action completed successfully.',
       },
     },
     {
@@ -28,7 +28,7 @@ describe('referral share UI orchestration', () => {
       expected: {
         tone: 'success',
         title: 'Share sheet opened',
-        message: 'The shared milestone was recorded only after the share action completed.',
+        message: 'The share action completed successfully.',
       },
     },
     {
