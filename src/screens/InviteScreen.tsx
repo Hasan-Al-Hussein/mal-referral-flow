@@ -311,17 +311,13 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
               {labOpen ? (
                 <AnimatedReveal duration={motion.feedback} distance={12} variant="forward">
                   <View style={[styles.labBody, { borderTopColor: colors.border }]}>
-                    {coordinator.integrationMode === 'web-demo' ? (
-                      <StatusBanner
-                        tone="info"
-                        title="Reviewer fixture — no app-store install"
-                        message="These controls exercise the parser and state machine locally. Native Branch install attribution and Firebase delivery require the documented custom build."
-                      />
-                    ) : null}
+                    <StatusBanner
+                      tone="info"
+                      title="Reviewer fixture — no provider handoff"
+                      message="These controls inject deterministic Branch-shaped callbacks into the parser and state machine. Real Branch delivery, app-store installation, first-launch attribution, and Firebase delivery require a configured native build."
+                    />
                     <Text style={[styles.labDescription, { color: colors.inkMuted }]}>
-                      {coordinator.integrationMode === 'web-demo'
-                        ? 'Direct and deferred controls inject Branch-shaped reviewer fixtures. The deferred option simulates the callback shape only; it does not perform an install.'
-                        : 'Direct and deferred controls use the same link parser. The deferred path represents the callback received on first launch after installation.'}
+                      Direct and deferred controls inject Branch-shaped reviewer fixtures. The deferred option sets the first-session callback flag; it does not perform an install.
                     </Text>
                     <View style={styles.labButtons}>
                       <Button label="Simulate direct callback" icon="corner-down-right" variant="secondary" disabled={isGenerating || isSharing || isResetting} onPress={() => simulate('direct')} />

@@ -197,7 +197,11 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                         </Text>
                       </View>
                     ) : null}
-                    <Text style={[styles.arrivalTitle, { color: colors.ink }]}>The link survived the handoff.</Text>
+                    <Text style={[styles.arrivalTitle, { color: colors.ink }]}>
+                      {isReviewerFixture
+                        ? 'The simulated callback was accepted.'
+                        : 'The link survived the handoff.'}
+                    </Text>
                     <Text style={[styles.arrivalDescription, { color: colors.inkMuted }]}>The code is persisted before navigation and becomes immutable when signup starts.</Text>
                     {isSimulatedDeferred ? (
                       <View
