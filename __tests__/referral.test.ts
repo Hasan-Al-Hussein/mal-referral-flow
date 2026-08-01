@@ -307,6 +307,14 @@ describe('shareable referral URLs', () => {
     (value) => expect(isShareableReferralUrl(value)).toBe(true),
   );
 
+  it.each([
+    'http://localhost:8765/?referral_code=MAL-ABCD2345',
+    'http://127.0.0.1:4173/?referral_code=MAL-ABCD2345',
+    'http://[::1]:19006/?referral_code=MAL-ABCD2345',
+  ])('accepts loopback HTTP links for local reviewer builds: %s', (value) => {
+    expect(isShareableReferralUrl(value)).toBe(true);
+  });
+
   it.each(['', 'not a URL', 'http://insecure.example/r/code', 'malreferral://onboarding'])(
     'rejects an unusable link: %s',
     (value) => expect(isShareableReferralUrl(value)).toBe(false),

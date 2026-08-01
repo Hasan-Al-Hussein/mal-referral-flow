@@ -16,6 +16,22 @@ describe('referral share UI orchestration', () => {
       },
     },
     {
+      result: { status: 'shared', channel: 'web-share' } as const,
+      expected: {
+        tone: 'success',
+        title: 'Share sheet opened',
+        message: 'The shared milestone was recorded only after the share action completed.',
+      },
+    },
+    {
+      result: { status: 'shared', channel: 'native-share' } as const,
+      expected: {
+        tone: 'success',
+        title: 'Share sheet opened',
+        message: 'The shared milestone was recorded only after the share action completed.',
+      },
+    },
+    {
       result: { status: 'cancelled' } as const,
       expected: {
         tone: 'info',

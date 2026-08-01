@@ -64,6 +64,15 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
       attribution.fingerprint,
     );
   }, [attribution.fingerprint, attribution.referralCode, events]);
+  const includesReferrerMilestones =
+    activeMilestones.has('referral_link_generated') &&
+    activeMilestones.has('referral_link_shared');
+  const includesGeneratedMilestone = activeMilestones.has('referral_link_generated');
+  const simulatedHandoffCopy = includesReferrerMilestones
+    ? 'Combined reviewer journey: create, share, and click are preserved, so onboarding begins at 3/5.'
+    : includesGeneratedMilestone
+      ? 'Partial reviewer journey: create and click are preserved; share was not accepted, so onboarding begins at 2/5.'
+      : 'Standalone invitee trace: 1/5 is correct because create and share occur on the referrer’s device.';
   const formHasError = Boolean(fieldErrors.firstName || fieldErrors.email || serverError);
 
   useEffect(() => {
@@ -197,8 +206,7 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                       >
                         <Feather name="repeat" color={colors.accentStrong} size={16} />
                         <Text style={[styles.deviceHandoffText, { color: colors.inkMuted }]}>
-                          A standalone 1/5 is expected: generation and sharing occur on the
-                          referrer’s device; click, start, and completion occur on the invitee’s.
+                          {simulatedHandoffCopy}
                         </Text>
                       </View>
                     ) : null}

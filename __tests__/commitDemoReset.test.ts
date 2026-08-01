@@ -37,4 +37,24 @@ describe('committed demo reset presentation', () => {
       message: 'navigation unavailable',
     });
   });
+
+  it('keeps navigation terminal when a committed presentation refresh fails', async () => {
+    const calls: string[] = [];
+
+    await expect(
+      commitDemoReset(
+        async () => void calls.push('persisted'),
+        () => {
+          calls.push('ledger');
+          throw new Error('ledger unavailable');
+        },
+      ),
+    ).resolves.toEqual({
+      ok: false,
+      committed: true,
+      message: 'ledger unavailable',
+    });
+
+    expect(calls).toEqual(['persisted', 'ledger']);
+  });
 });

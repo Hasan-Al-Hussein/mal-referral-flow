@@ -51,15 +51,15 @@ This audit traces the assessment from baseline `651293d711668300414ae7e228c28d29
 | --- | --- |
 | `npm run typecheck` | Passed. |
 | `npm run lint` | Passed with zero warnings. |
-| `npm test -- --runInBand` | Passed: 10 suites, 147 tests. |
-| `npm test -- --runInBand --coverage` | Passed: 90.27% statements, 81.20% branches, 90.42% functions, 93.14% lines. |
+| `npm test -- --runInBand` | Passed: 12 suites, 161 tests. |
+| `npm test -- --runInBand --coverage` | Passed: 90.43% statements, 81.47% branches, 90.58% functions, 93.26% lines. |
 | Web/default `npx expo config --type public --json` | Passed with native providers disabled. |
 | Branch preview/test and production/live probes | Passed: test maps `apiKey`/`testApiKey`/enabled test mode; live omits `testApiKey` and disables test mode; legacy test alias passed; invalid live/test prefix failed as intended. |
 | Platform-specific Firebase config probes | Passed: EAS Android selected JSON only; EAS iOS selected plist only; missing Android worker file failed as intended. |
 | `npx expo-doctor` | Passed: 21/21 checks. |
-| `npm run build:web` | Passed: Expo exported `dist` from 605 modules. |
+| `npm run build:web` | Passed: Expo exported `dist` from 608 modules. |
 
-Coverage is a gap signal, not a completeness claim. Against the supplied 22-test baseline, aggregate statements increased from 79.86% to 90.27% (+10.41 points), branches from 77.19% to 81.20% (+4.01), and functions from 63.63% to 90.42% (+26.79). The branch percentage reflects substantial reset, migration, accepted-recovery, and timeout branching; tests prioritize the concrete reviewed behaviors rather than a vanity percentage. Final coverage is: `ReferralCoordinator` 90.38% statements / 94.60% lines; `AnalyticsTracker` 93.93% / 95.40%; `referralStorage` 87.52% / 90.54%.
+Coverage is a gap signal, not a completeness claim. Against the supplied 22-test baseline, aggregate statements increased from 79.86% to 90.43% (+10.57 points), branches from 77.19% to 81.47% (+4.28), and functions from 63.63% to 90.58% (+26.95). The branch percentage reflects substantial reset, migration, accepted-recovery, timeout, share-outcome, and presentation branching; tests prioritize the concrete reviewed behaviors rather than a vanity percentage. Final coverage is: `ReferralCoordinator` 90.38% statements / 94.60% lines; `AnalyticsTracker` 93.93% / 95.40%; `referralStorage` 87.52% / 90.54%; `runReferralShare` 100% / 100%; and `commitDemoReset` 100% statements / 100% lines.
 
 ## External proof boundary
 
