@@ -20,7 +20,10 @@ import type { AnalyticsTracker } from '../services/analytics/AnalyticsTracker';
 import type { DeepLinkService } from '../services/deepLinks/deepLinkService';
 import type { MockReferralApi } from '../services/referrals/mockReferralApi';
 import type { ShareResult, ShareService } from '../services/share/shareService';
-import type { ReferralStorage } from '../services/storage/referralStorage';
+import type {
+  AcceptedReferralOutcome,
+  ReferralStorage,
+} from '../services/storage/referralStorage';
 
 export interface GeneratedReferral {
   referralCode: string;
@@ -30,15 +33,21 @@ export interface GeneratedReferral {
 export interface SignupResult {
   accountId: string;
   referralCode: string;
+  referralFingerprint: string;
 }
 
 export type ReferralNavigator = (attribution: ReferralAttribution) => void;
+export type AcceptedSignupNavigator = (result: SignupResult) => void;
 export type ReferralJourneyListener = (attribution: ReferralAttribution) => void;
 
-class ReferralLifecycleCancelledError extends Error {
+export class ReferralLifecycleCancelledError extends Error {
   constructor() {
     super('Referral operation was cancelled by a state reset.');
   }
+}
+
+export function isReferralLifecycleCancelled(error: unknown): boolean {
+  return error instanceof ReferralLifecycleCancelledError;
 }
 
 function sameJourneyIdentity(
@@ -55,12 +64,14 @@ export class ReferralCoordinator {
   private unsubscribeFromLinks: (() => void) | undefined;
   private navigator: ReferralNavigator | undefined;
   private bufferedRoute: ReferralAttribution | undefined;
+  private acceptedNavigator: AcceptedSignupNavigator | undefined;
+  private bufferedAcceptedResult: SignupResult | undefined;
   private lastRoutedFingerprint: string | undefined;
+  private lastRoutedAcceptedFingerprint: string | undefined;
   private shareAttemptSequence = 0;
   private lifecycle = 0;
   private resetBarrier: Promise<void> = Promise.resolve();
-  private deepLinkQueue: Promise<void> = Promise.resolve();
-  private signupQueue: Promise<void> = Promise.resolve();
+  private journeyQueue: Promise<void> = Promise.resolve();
   private readonly generationRequests = new Map<string, Promise<GeneratedReferral>>();
   private readonly completionRequests = new Map<string, Promise<SignupResult>>();
   private readonly journeyListeners = new Set<ReferralJourneyListener>();
@@ -77,26 +88,27 @@ export class ReferralCoordinator {
 
   start(): void {
     if (this.unsubscribeFromLinks) return;
+    const lifecycle = this.lifecycle;
     try {
       this.unsubscribeFromLinks = this.deepLinks.subscribe((event) => {
-        const lifecycle = this.lifecycle;
+        const callbackLifecycle = this.lifecycle;
         void this.handleDeepLink(event).catch((error: unknown) => {
-          if (!this.isCancellation(error) && this.isCurrent(lifecycle)) {
-            void this.reportLinkProcessingFailure('callback_processing_failed', lifecycle);
+          if (!this.isCancellation(error) && this.isCurrent(callbackLifecycle)) {
+            void this.reportLinkProcessingFailure(
+              'callback_processing_failed',
+              callbackLifecycle,
+            );
           }
         });
       });
     } catch {
-      const lifecycle = this.lifecycle;
       void this.reportLinkProcessingFailure('subscription_failed', lifecycle);
-      return;
     }
 
-    const lifecycle = this.lifecycle;
     void this.afterReset(lifecycle)
       .then(() => this.analytics.flushPending())
       .catch(() => undefined);
-    void this.enqueueDeepLink(lifecycle, () => this.restorePendingRoute(lifecycle)).catch(
+    void this.enqueueDeepLink(lifecycle, () => this.restoreStartupState(lifecycle)).catch(
       (error: unknown) => {
         if (!this.isCancellation(error) && this.isCurrent(lifecycle)) {
           void this.reportLinkProcessingFailure('pending_restore_failed', lifecycle);
@@ -113,12 +125,21 @@ export class ReferralCoordinator {
     }
   }
 
-  setNavigator(navigator: ReferralNavigator): void {
+  setNavigator(
+    navigator: ReferralNavigator,
+    acceptedNavigator?: AcceptedSignupNavigator,
+  ): void {
     this.navigator = navigator;
+    this.acceptedNavigator = acceptedNavigator;
     if (this.bufferedRoute) {
       const route = this.bufferedRoute;
       this.bufferedRoute = undefined;
       navigator(route);
+    }
+    if (this.bufferedAcceptedResult && acceptedNavigator) {
+      const result = this.bufferedAcceptedResult;
+      this.bufferedAcceptedResult = undefined;
+      acceptedNavigator(result);
     }
   }
 
@@ -233,22 +254,16 @@ export class ReferralCoordinator {
     this.lifecycle += 1;
     this.analytics.resetLifecycle();
     this.referralApi.resetLifecycle?.();
-    this.deepLinkQueue = Promise.resolve();
-    this.signupQueue = Promise.resolve();
+    this.journeyQueue = Promise.resolve();
     this.generationRequests.clear();
     this.completionRequests.clear();
     this.bufferedRoute = undefined;
+    this.bufferedAcceptedResult = undefined;
     this.lastRoutedFingerprint = undefined;
+    this.lastRoutedAcceptedFingerprint = undefined;
     this.shareAttemptSequence = 0;
 
-    const reset = withTimeout(
-      this.storage.resetDemoState(),
-      'referral state reset',
-      this.timeoutMs,
-    ).then(
-      () => undefined,
-      () => undefined,
-    );
+    const reset = this.storage.resetDemoState(this.timeoutMs).then(() => undefined);
     this.resetBarrier = reset;
     return reset;
   }
@@ -313,7 +328,11 @@ export class ReferralCoordinator {
   }
 
   private async processDeepLink(event: RawDeepLinkEvent, lifecycle: number): Promise<void> {
-    const parsed = parseReferralAttribution(event);
+    const parsed = await this.boundary(
+      parseReferralAttribution(event),
+      lifecycle,
+      'referral attribution fingerprint',
+    );
     if (parsed.status === 'ignored') return;
 
     if (parsed.status === 'rejected') {
@@ -376,6 +395,14 @@ export class ReferralCoordinator {
         'processed attribution read',
       )
     ) {
+      const pending = await this.boundary(
+        this.storage.getPendingAttribution(),
+        lifecycle,
+        'processed attribution pending read',
+      );
+      if (pending && sameJourneyIdentity(pending, attribution)) {
+        this.route(pending, lifecycle);
+      }
       await this.track(
         lifecycle,
         'referral_duplicate_suppressed',
@@ -407,13 +434,15 @@ export class ReferralCoordinator {
       },
     );
     if (delivery !== 'failed') {
+      this.route(attribution, lifecycle);
       await this.boundary(
         this.storage.markAttributionProcessed(attribution.fingerprint),
         lifecycle,
         'processed attribution write',
       );
+    } else {
+      this.route(attribution, lifecycle);
     }
-    this.route(attribution, lifecycle);
   }
 
   private async beginSignupUnlocked(
@@ -487,11 +516,19 @@ export class ReferralCoordinator {
     lifecycle: number,
   ): Promise<SignupResult> {
     const suppliedAttribution = parseStoredReferralAttribution(attribution);
-    const frozen = await this.boundary(
+    const storedFrozen = await this.boundary(
       this.storage.getFrozenAttribution(),
       lifecycle,
       'frozen signup attribution read',
     );
+    const existingOutcome = storedFrozen
+      ? null
+      : await this.boundary(
+          this.storage.getAcceptedReferralOutcome(),
+          lifecycle,
+          'accepted signup outcome read',
+        );
+    const frozen = storedFrozen ?? existingOutcome?.attribution ?? null;
     const flowId = frozen
       ? `invitee:${frozen.fingerprint}`
       : suppliedAttribution
@@ -530,14 +567,39 @@ export class ReferralCoordinator {
 
     // Backend acceptance is the commit point. Analytics and local cleanup are
     // retryable follow-up work and must never relabel an accepted signup as failed.
-    await this.track(lifecycle, 'referral_signup_completed', frozen.referralCode, flowId, {
-      attributionKind: frozen.kind,
-      isFirstSession: frozen.kind === 'deferred' || frozen.kind === 'demo-deferred',
-      ...(frozen.matchGuaranteed !== undefined
-        ? { matchGuaranteed: frozen.matchGuaranteed }
-        : {}),
-    });
+    const outcome: AcceptedReferralOutcome = {
+      ...accepted,
+      referralCode: frozen.referralCode,
+      attribution: frozen,
+    };
+    let outcomePersisted = false;
     try {
+      await this.boundary(
+        this.storage.saveAcceptedReferralOutcome(outcome),
+        lifecycle,
+        'accepted referral outcome write',
+      );
+      outcomePersisted = true;
+    } catch (error) {
+      if (this.isCancellation(error)) throw error;
+      // The frozen attribution plus backend receipt remain sufficient to
+      // reconstruct this accepted outcome on the next start.
+    }
+    try {
+      await this.track(lifecycle, 'referral_signup_completed', frozen.referralCode, flowId, {
+        attributionKind: frozen.kind,
+        isFirstSession: frozen.kind === 'deferred' || frozen.kind === 'demo-deferred',
+        ...(frozen.matchGuaranteed !== undefined
+          ? { matchGuaranteed: frozen.matchGuaranteed }
+          : {}),
+      });
+    } catch (error) {
+      if (this.isCancellation(error)) throw error;
+      // Backend acceptance is authoritative; a retry reuses the receipt and
+      // retries this idempotent milestone without surfacing signup failure.
+    }
+    try {
+      if (!outcomePersisted) throw new Error('Accepted outcome is not durable yet.');
       await this.boundary(
         this.storage.completeReferralJourney(frozen),
         lifecycle,
@@ -547,13 +609,99 @@ export class ReferralCoordinator {
       if (this.isCancellation(error)) throw error;
       // The frozen identity and idempotent backend receipt deliberately remain.
       // Startup and the next referral operation retry this one-record cleanup.
-      await this.reportAcceptedCleanupFailure(frozen, lifecycle);
+      try {
+        await this.reportAcceptedCleanupFailure(frozen, lifecycle);
+      } catch (diagnosticError) {
+        if (this.isCancellation(diagnosticError)) throw diagnosticError;
+        // An accepted signup must not reject because its follow-up diagnostic failed.
+      }
     }
-    return { ...accepted, referralCode: frozen.referralCode };
+    if (!this.isCurrent(lifecycle)) throw new ReferralLifecycleCancelledError();
+    return {
+      ...accepted,
+      referralCode: frozen.referralCode,
+      referralFingerprint: frozen.fingerprint,
+    };
+  }
+
+  private async restoreStartupState(lifecycle: number): Promise<void> {
+    const accepted = await this.recoverAcceptedSignup(lifecycle);
+    if (accepted) {
+      this.routeAccepted(accepted, lifecycle);
+      return;
+    }
+    await this.restorePendingRoute(lifecycle);
+  }
+
+  private async recoverAcceptedSignup(
+    lifecycle: number,
+  ): Promise<AcceptedReferralOutcome | null> {
+    let outcome = await this.boundary(
+      this.storage.getAcceptedReferralOutcome(),
+      lifecycle,
+      'accepted referral outcome restore',
+    );
+    let outcomePersisted = Boolean(outcome);
+    if (!outcome) {
+      const frozen = await this.boundary(
+        this.storage.getFrozenAttribution(),
+        lifecycle,
+        'accepted frozen attribution restore',
+      );
+      if (!frozen) return null;
+      const receipt = await this.boundary(
+        this.storage.getSignupReceipt(`signup:${frozen.fingerprint}`),
+        lifecycle,
+        'accepted signup receipt restore',
+      );
+      if (!receipt || receipt.referralCode !== frozen.referralCode) return null;
+      outcome = { ...receipt, attribution: frozen };
+      try {
+        await this.boundary(
+          this.storage.saveAcceptedReferralOutcome(outcome),
+          lifecycle,
+          'accepted referral outcome recovery write',
+        );
+        outcomePersisted = true;
+      } catch {
+        // Frozen attribution plus receipt remain the durable recovery source.
+      }
+    }
+
+    const attribution = outcome.attribution;
+    await this.track(
+      lifecycle,
+      'referral_signup_completed',
+      attribution.referralCode,
+      `invitee:${attribution.fingerprint}`,
+      {
+        attributionKind: attribution.kind,
+        isFirstSession:
+          attribution.kind === 'deferred' || attribution.kind === 'demo-deferred',
+        ...(attribution.matchGuaranteed !== undefined
+          ? { matchGuaranteed: attribution.matchGuaranteed }
+          : {}),
+      },
+    );
+    if (outcomePersisted) {
+      try {
+        await this.boundary(
+          this.storage.completeReferralJourney(attribution),
+          lifecycle,
+          'accepted referral cleanup recovery',
+        );
+      } catch {
+        try {
+          await this.reportAcceptedCleanupFailure(attribution, lifecycle);
+        } catch {
+          // Success recovery remains authoritative even if cleanup diagnostics fail.
+        }
+      }
+    }
+    return outcome;
   }
 
   private async restorePendingRoute(lifecycle: number): Promise<void> {
-    await this.getFrozenAfterAcceptedCleanup(lifecycle);
     const pending = await this.boundary(
       this.storage.getPendingAttribution(),
       lifecycle,
@@ -565,31 +713,38 @@ export class ReferralCoordinator {
   private async getFrozenAfterAcceptedCleanup(
     lifecycle: number,
   ): Promise<ReferralAttribution | null> {
+    const acceptedOutcome = await this.boundary(
+      this.storage.getAcceptedReferralOutcome(),
+      lifecycle,
+      'accepted referral outcome read',
+    );
+    if (acceptedOutcome) return acceptedOutcome.attribution;
     const frozen = await this.boundary(
       this.storage.getFrozenAttribution(),
       lifecycle,
       'frozen attribution read',
     );
-    if (!frozen) return null;
-    const receipt = await this.boundary(
-      this.storage.getSignupReceipt(`signup:${frozen.fingerprint}`),
-      lifecycle,
-      'accepted referral receipt read',
-    );
-    if (!receipt || receipt.referralCode !== frozen.referralCode) return frozen;
+    return frozen;
+  }
 
-    try {
-      await this.boundary(
-        this.storage.completeReferralJourney(frozen),
-        lifecycle,
-        'accepted referral cleanup retry',
-      );
-      return null;
-    } catch (error) {
-      if (this.isCancellation(error)) throw error;
-      await this.reportAcceptedCleanupFailure(frozen, lifecycle);
-      return frozen;
-    }
+  private routeAccepted(outcome: AcceptedReferralOutcome, lifecycle: number): void {
+    if (!this.isCurrent(lifecycle)) throw new ReferralLifecycleCancelledError();
+    if (this.lastRoutedAcceptedFingerprint === outcome.attribution.fingerprint) return;
+    this.lastRoutedAcceptedFingerprint = outcome.attribution.fingerprint;
+    this.journeyListeners.forEach((listener) => {
+      try {
+        listener(outcome.attribution);
+      } catch {
+        // Presentation observers cannot change accepted-state recovery.
+      }
+    });
+    const result: SignupResult = {
+      accountId: outcome.accountId,
+      referralCode: outcome.referralCode,
+      referralFingerprint: outcome.attribution.fingerprint,
+    };
+    if (this.acceptedNavigator) this.acceptedNavigator(result);
+    else this.bufferedAcceptedResult = result;
   }
 
   private route(attribution: ReferralAttribution, lifecycle: number): void {
@@ -614,24 +769,24 @@ export class ReferralCoordinator {
     lifecycle: number,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const result = this.deepLinkQueue
-      .then(() => this.afterReset(lifecycle))
-      .then(operation);
-    this.deepLinkQueue = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+    return this.enqueueJourney(lifecycle, operation);
   }
 
   private enqueueSignup<T>(
     lifecycle: number,
     operation: () => Promise<T>,
   ): Promise<T> {
-    const result = this.signupQueue
+    return this.enqueueJourney(lifecycle, operation);
+  }
+
+  private enqueueJourney<T>(
+    lifecycle: number,
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const result = this.journeyQueue
       .then(() => this.afterReset(lifecycle))
       .then(operation);
-    this.signupQueue = result.then(
+    this.journeyQueue = result.then(
       () => undefined,
       () => undefined,
     );
@@ -653,18 +808,23 @@ export class ReferralCoordinator {
     return result;
   }
 
-  private track(
+  private async track(
     lifecycle: number,
     ...parameters: Parameters<AnalyticsTracker['track']>
   ): Promise<Awaited<ReturnType<AnalyticsTracker['track']>>> {
     if (!this.isCurrent(lifecycle)) {
-      return Promise.reject(new ReferralLifecycleCancelledError());
+      throw new ReferralLifecycleCancelledError();
     }
-    return this.boundary(
-      this.analytics.track(...parameters),
-      lifecycle,
-      `analytics ${parameters[0]}`,
-    );
+    try {
+      const delivery = await this.analytics.track(...parameters);
+      if (!this.isCurrent(lifecycle)) throw new ReferralLifecycleCancelledError();
+      return delivery;
+    } catch (error) {
+      if (!this.isCurrent(lifecycle) || this.isCancellation(error)) {
+        throw new ReferralLifecycleCancelledError();
+      }
+      return 'failed';
+    }
   }
 
   private async reportLinkProcessingFailure(

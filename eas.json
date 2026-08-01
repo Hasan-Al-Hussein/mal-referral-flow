@@ -8,7 +8,8 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "NATIVE_SDK_BUILD": "1"
+        "NATIVE_SDK_BUILD": "1",
+        "BRANCH_ENVIRONMENT": "test"
       },
       "android": {
         "env": {
@@ -25,7 +26,8 @@
       "environment": "preview",
       "distribution": "internal",
       "env": {
-        "NATIVE_SDK_BUILD": "1"
+        "NATIVE_SDK_BUILD": "1",
+        "BRANCH_ENVIRONMENT": "test"
       },
       "android": {
         "buildType": "apk",
@@ -43,7 +45,8 @@
       "environment": "production",
       "autoIncrement": true,
       "env": {
-        "NATIVE_SDK_BUILD": "1"
+        "NATIVE_SDK_BUILD": "1",
+        "BRANCH_ENVIRONMENT": "live"
       },
       "android": {
         "env": {

@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 
+import { isReferralLifecycleCancelled } from '../application/ReferralCoordinator';
 import { getAcceptedReferralMilestones } from '../application/referralProgress';
 import { useReferralRuntime } from '../application/ReferralRuntime';
 import { Button } from '../components/Button';
@@ -50,8 +51,12 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
   const emailRef = useRef<TextInput>(null);
   const submissionLock = useRef(false);
   const completedSteps = useMemo(() => {
-    return getAcceptedReferralMilestones(events, attribution.referralCode).size;
-  }, [attribution.referralCode, events]);
+    return getAcceptedReferralMilestones(
+      events,
+      attribution.referralCode,
+      attribution.fingerprint,
+    ).size;
+  }, [attribution.fingerprint, attribution.referralCode, events]);
 
   const begin = async () => {
     setServerError(null);
@@ -94,7 +99,9 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
       );
       navigation.replace('Success', result);
     } catch (caught) {
-      setServerError(caught instanceof Error ? caught.message : 'Signup could not be completed.');
+      if (!isReferralLifecycleCancelled(caught)) {
+        setServerError(caught instanceof Error ? caught.message : 'Signup could not be completed.');
+      }
     } finally {
       submissionLock.current = false;
       setIsSubmitting(false);
@@ -305,7 +312,10 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                   />
                   {mobileTraceOpen ? (
                     <AnimatedReveal duration={motion.feedback} distance={8}>
-                      <EventLedger referralCode={attribution.referralCode} />
+                      <EventLedger
+                        referralCode={attribution.referralCode}
+                        referralFingerprint={attribution.fingerprint}
+                      />
                     </AnimatedReveal>
                   ) : null}
                 </View>
@@ -314,7 +324,10 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
 
             {isWide ? (
               <AnimatedReveal delay={motion.stagger * 3} style={styles.sideColumn}>
-                <EventLedger referralCode={attribution.referralCode} />
+                <EventLedger
+                  referralCode={attribution.referralCode}
+                  referralFingerprint={attribution.fingerprint}
+                />
               </AnimatedReveal>
             ) : null}
           </View>

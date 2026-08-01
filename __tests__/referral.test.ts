@@ -1,15 +1,29 @@
-import { describe, expect, it } from '@jest/globals';
+import { createHash } from 'node:crypto';
+
+import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
+import * as Crypto from 'expo-crypto';
 
 import {
   isShareableReferralUrl,
   parseStoredReferralAttribution,
   REFERRAL_DESTINATION,
   parseReferralAttribution,
+  stableHash,
   type RawDeepLinkEvent,
 } from '../src/domain/referral';
 
 const DIRECT_CODE = 'MAL-ABCD2345';
 const NOW = new Date('2026-07-31T12:00:00.000Z');
+
+beforeAll(() => {
+  jest.spyOn(Crypto, 'digestStringAsync').mockImplementation(async (_algorithm, value) =>
+    createHash('sha256').update(value).digest('hex'),
+  );
+});
+
+afterAll(() => {
+  jest.restoreAllMocks();
+});
 
 function branchEvent(overrides: Partial<RawDeepLinkEvent> = {}): RawDeepLinkEvent {
   return {
@@ -29,8 +43,8 @@ describe('parseReferralAttribution', () => {
   it.each([
     { firstSession: false, expectedKind: 'direct' },
     { firstSession: true, expectedKind: 'deferred' },
-  ] as const)('accepts a valid $expectedKind Branch attribution', ({ firstSession, expectedKind }) => {
-    const result = parseReferralAttribution(
+  ] as const)('accepts a valid $expectedKind Branch attribution', async ({ firstSession, expectedKind }) => {
+    const result = await parseReferralAttribution(
       branchEvent({
         params: {
           '+clicked_branch_link': true,
@@ -53,11 +67,11 @@ describe('parseReferralAttribution', () => {
       uri: 'https://mal.test-app.link/referral',
       receivedAt: NOW.toISOString(),
     });
-    expect(result.attribution.fingerprint).toMatch(/^[a-z0-9]{7}$/);
+    expect(result.attribution.fingerprint).toMatch(/^fp_[a-f0-9]{32}$/);
   });
 
-  it('rejects a missing referral code', () => {
-    const result = parseReferralAttribution(
+  it('rejects a missing referral code', async () => {
+    const result = await parseReferralAttribution(
       branchEvent({
         params: {
           '+clicked_branch_link': true,
@@ -73,8 +87,8 @@ describe('parseReferralAttribution', () => {
     });
   });
 
-  it('rejects a malformed referral code after normalizing it', () => {
-    const result = parseReferralAttribution(
+  it('rejects a malformed referral code after normalizing it', async () => {
+    const result = await parseReferralAttribution(
       branchEvent({
         params: {
           '+clicked_branch_link': true,
@@ -91,8 +105,8 @@ describe('parseReferralAttribution', () => {
     });
   });
 
-  it('rejects a valid code aimed at an unsupported destination', () => {
-    const result = parseReferralAttribution(
+  it('rejects a valid code aimed at an unsupported destination', async () => {
+    const result = await parseReferralAttribution(
       branchEvent({
         params: {
           '+clicked_branch_link': true,
@@ -110,8 +124,8 @@ describe('parseReferralAttribution', () => {
     });
   });
 
-  it('ignores a session that was not opened by a Branch click', () => {
-    const result = parseReferralAttribution(
+  it('ignores a session that was not opened by a Branch click', async () => {
+    const result = await parseReferralAttribution(
       branchEvent({
         params: {
           '+clicked_branch_link': false,
@@ -123,9 +137,9 @@ describe('parseReferralAttribution', () => {
     expect(result).toEqual({ status: 'ignored', reason: 'not_a_branch_click' });
   });
 
-  it('redacts malformed and oversized payload values from telemetry-safe parse results', () => {
+  it('redacts malformed and oversized payload values from telemetry-safe parse results', async () => {
     const sensitiveValue = `${'reviewer@example.com'.repeat(300)}-secret`;
-    const result = parseReferralAttribution(
+    const result = await parseReferralAttribution(
       branchEvent({
         params: {
           '+clicked_branch_link': true,
@@ -142,9 +156,9 @@ describe('parseReferralAttribution', () => {
     expect(JSON.stringify(result)).not.toContain('reviewer@example.com');
   });
 
-  it('classifies provider errors without exposing malformed referral input', () => {
+  it('classifies provider errors without exposing malformed referral input', async () => {
     expect(
-      parseReferralAttribution({
+      await parseReferralAttribution({
         error: 'provider detail remains local',
         params: { referral_code: 'email@example.com' },
       }),
@@ -156,8 +170,8 @@ describe('parseReferralAttribution', () => {
     });
   });
 
-  it('captures Branch match certainty when the provider supplies it', () => {
-    const result = parseReferralAttribution(
+  it('captures Branch match certainty when the provider supplies it', async () => {
+    const result = await parseReferralAttribution(
       branchEvent({
         params: {
           '+clicked_branch_link': true,
@@ -178,8 +192,8 @@ describe('parseReferralAttribution', () => {
     }
   });
 
-  it('strips callback query and fragment data before persisting attribution', () => {
-    const result = parseReferralAttribution(
+  it('strips callback query and fragment data before persisting attribution', async () => {
+    const result = await parseReferralAttribution(
       branchEvent({
         uri: 'https://mal.test-app.link/referral?email=reviewer@example.com#private',
       }),
@@ -190,6 +204,65 @@ describe('parseReferralAttribution', () => {
     if (result.status === 'accepted') {
       expect(result.attribution.uri).toBe('https://mal.test-app.link/referral');
       expect(JSON.stringify(result.attribution)).not.toContain('reviewer@example.com');
+    }
+  });
+
+  it('canonicalizes a real numeric Branch click timestamp identically to its string form', async () => {
+    const numeric = await parseReferralAttribution(
+      branchEvent({ params: { ...branchEvent().params, '+click_timestamp': 1774958400 } }),
+      () => NOW,
+    );
+    const string = await parseReferralAttribution(branchEvent(), () => NOW);
+
+    expect(numeric.status).toBe('accepted');
+    expect(string.status).toBe('accepted');
+    if (numeric.status === 'accepted' && string.status === 'accepted') {
+      expect(numeric.attribution.fingerprint).toBe(string.attribution.fingerprint);
+    }
+  });
+
+  it('keeps distinct genuine clicks on the same canonical URI separate by timestamp', async () => {
+    const first = await parseReferralAttribution(
+      branchEvent({ params: { ...branchEvent().params, '+click_timestamp': 1774958400 } }),
+      () => NOW,
+    );
+    const second = await parseReferralAttribution(
+      branchEvent({ params: { ...branchEvent().params, '+click_timestamp': 1774958401 } }),
+      () => NOW,
+    );
+
+    expect(first.status).toBe('accepted');
+    expect(second.status).toBe('accepted');
+    if (first.status === 'accepted' && second.status === 'accepted') {
+      expect(first.attribution.fingerprint).not.toBe(second.attribution.fingerprint);
+    }
+  });
+
+  it('separates the supplied legacy 32-bit collision while preserving replay stability', async () => {
+    const oldInput = (timestamp: string) =>
+      [DIRECT_CODE, timestamp, 'https://mal.test-app.link/referral', 'direct'].join('|');
+    expect(stableHash(oldInput('6530162172392246502'))).toBe(
+      stableHash(oldInput('9508607791575536739')),
+    );
+
+    const firstEvent = branchEvent({
+      params: { ...branchEvent().params, '+click_timestamp': '6530162172392246502' },
+    });
+    const secondEvent = branchEvent({
+      params: { ...branchEvent().params, '+click_timestamp': '9508607791575536739' },
+    });
+    const [first, replay, second] = await Promise.all([
+      parseReferralAttribution(firstEvent, () => NOW),
+      parseReferralAttribution(firstEvent, () => new Date(NOW.getTime() + 1_000)),
+      parseReferralAttribution(secondEvent, () => NOW),
+    ]);
+
+    expect(first.status).toBe('accepted');
+    expect(replay.status).toBe('accepted');
+    expect(second.status).toBe('accepted');
+    if (first.status === 'accepted' && replay.status === 'accepted' && second.status === 'accepted') {
+      expect(first.attribution.fingerprint).toBe(replay.attribution.fingerprint);
+      expect(first.attribution.fingerprint).not.toBe(second.attribution.fingerprint);
     }
   });
 });
@@ -208,6 +281,12 @@ describe('persisted attribution validation', () => {
   it('accepts a recent, complete attribution record', () => {
     expect(parseStoredReferralAttribution(validAttribution, () => NOW)).toEqual(
       validAttribution,
+    );
+  });
+
+  it('accepts a legacy seven-character fingerprint only as persisted compatibility', () => {
+    expect(parseStoredReferralAttribution(validAttribution, () => NOW)?.fingerprint).toBe(
+      'abc1234',
     );
   });
 

@@ -166,3 +166,24 @@ export function isReferralEventRecord(value: unknown): value is ReferralEventRec
     (payload.match_guaranteed === undefined || typeof payload.match_guaranteed === 'boolean')
   );
 }
+
+export function hasSameAnalyticsIdentity(
+  first: ReferralEventRecord,
+  second: ReferralEventRecord,
+): boolean {
+  const firstProperties = first.properties;
+  const secondProperties = second.properties;
+  return (
+    first.name === second.name &&
+    firstProperties.flow_id === secondProperties.flow_id &&
+    firstProperties.referral_code === secondProperties.referral_code &&
+    firstProperties.platform === secondProperties.platform &&
+    firstProperties.schema_version === secondProperties.schema_version &&
+    firstProperties.app_version === secondProperties.app_version &&
+    firstProperties.attribution_kind === secondProperties.attribution_kind &&
+    firstProperties.is_first_session === secondProperties.is_first_session &&
+    firstProperties.match_guaranteed === secondProperties.match_guaranteed &&
+    firstProperties.share_channel === secondProperties.share_channel &&
+    firstProperties.reason === secondProperties.reason
+  );
+}

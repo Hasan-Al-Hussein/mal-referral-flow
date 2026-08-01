@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 
+import { commitDemoReset } from '../application/commitDemoReset';
 import { getAcceptedReferralMilestones } from '../application/referralProgress';
 import { useReferralRuntime } from '../application/ReferralRuntime';
 import { Button } from '../components/Button';
@@ -136,15 +137,30 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
   const reset = async () => {
     setIsResetting(true);
     try {
-      await coordinator.resetDemoState();
-      clearLedger();
-      setReferral(null);
-      setNotice({
-        tone: 'info',
-        title: 'Test state cleared',
-        message: 'Attribution, milestone deduplication, and the visible event trace were reset.',
-      });
-      navigation.popToTop();
+      const result = await commitDemoReset(
+        () => coordinator.resetDemoState(),
+        () => {
+          clearLedger();
+          setReferral(null);
+          setNotice({
+            tone: 'info',
+            title: 'Test state cleared',
+            message: 'Attribution, milestone deduplication, and the visible event trace were reset.',
+          });
+          navigation.popToTop();
+        },
+      );
+      if (!result.ok) {
+        setNotice({
+          tone: 'error',
+          title: result.committed
+            ? 'Reset committed; refresh incomplete'
+            : 'Reset could not be committed',
+          message: result.committed
+            ? `${result.message} Reopen the referral lab to refresh the screen.`
+            : `${result.message} Your current journey is still available; try again.`,
+        });
+      }
     } finally {
       setIsResetting(false);
     }

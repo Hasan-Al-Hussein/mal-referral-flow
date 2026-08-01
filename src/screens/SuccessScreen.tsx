@@ -3,12 +3,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useMemo, useState } from 'react';
 import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
+import { commitDemoReset } from '../application/commitDemoReset';
 import { getAcceptedReferralMilestones } from '../application/referralProgress';
 import { useReferralRuntime } from '../application/ReferralRuntime';
 import { Button } from '../components/Button';
 import { EventLedger } from '../components/EventLedger';
 import { ReferralOrbit } from '../components/ReferralOrbit';
 import { ScreenShell } from '../components/ScreenShell';
+import { StatusBanner } from '../components/StatusBanner';
 import { REQUIRED_REFERRAL_EVENTS } from '../domain/analytics';
 import { AnimatedReveal } from '../motion/AnimatedReveal';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
@@ -19,7 +21,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 type Props = NativeStackScreenProps<RootStackParamList, 'Success'>;
 
 export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
-  const { accountId, referralCode } = route.params;
+  const { accountId, referralCode, referralFingerprint } = route.params;
   const { colors, isDark } = useAppTheme();
   const { width } = useWindowDimensions();
   const isWide = width >= 1200;
@@ -27,20 +29,32 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
   const { coordinator, clearLedger, events } = useReferralRuntime();
   const [mobileTraceOpen, setMobileTraceOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [resetError, setResetError] = useState<{
+    committed: boolean;
+    message: string;
+  } | null>(null);
   const completedSteps = useMemo(
-    () => getAcceptedReferralMilestones(events, referralCode).size,
-    [events, referralCode],
+    () => getAcceptedReferralMilestones(events, referralCode, referralFingerprint).size,
+    [events, referralCode, referralFingerprint],
   );
 
   const restart = async () => {
     setIsResetting(true);
+    setResetError(null);
     try {
-      await coordinator.resetDemoState();
-      clearLedger();
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Invite' }],
-      });
+      const result = await commitDemoReset(
+        () => coordinator.resetDemoState(),
+        () => {
+          clearLedger();
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Invite' }],
+          });
+        },
+      );
+      if (!result.ok) {
+        setResetError({ committed: result.committed, message: result.message });
+      }
     } finally {
       setIsResetting(false);
     }
@@ -94,6 +108,21 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
                   </View>
                   <Text style={[styles.noteText, { color: colors.inkMuted }]}>Production rewards belong to an idempotent backend ledger—not the mobile client.</Text>
                 </View>
+                {resetError ? (
+                  <StatusBanner
+                    tone="error"
+                    title={
+                      resetError.committed
+                        ? 'Reset committed; refresh incomplete'
+                        : 'Reset could not be committed'
+                    }
+                    message={
+                      resetError.committed
+                        ? `${resetError.message} Reopen the referral lab to refresh the screen.`
+                        : `${resetError.message} Your completed receipt remains available; try again.`
+                    }
+                  />
+                ) : null}
                 <Button label="Run the flow again" icon="refresh-cw" loading={isResetting} fullWidth onPress={() => void restart()} />
               </LinearGradient>
             </AnimatedReveal>
@@ -110,7 +139,10 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
                 />
                 {mobileTraceOpen ? (
                   <AnimatedReveal duration={motion.feedback} distance={8}>
-                    <EventLedger referralCode={referralCode} />
+                    <EventLedger
+                      referralCode={referralCode}
+                      referralFingerprint={referralFingerprint}
+                    />
                   </AnimatedReveal>
                 ) : null}
               </View>
@@ -119,7 +151,10 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
 
           {isWide ? (
             <AnimatedReveal delay={motion.stagger * 2} style={styles.sideColumn}>
-              <EventLedger referralCode={referralCode} />
+              <EventLedger
+                referralCode={referralCode}
+                referralFingerprint={referralFingerprint}
+              />
             </AnimatedReveal>
           ) : null}
         </View>

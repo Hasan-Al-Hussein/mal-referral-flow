@@ -42,16 +42,17 @@ const failureEvents = new Set<ReferralEventName>(
 
 interface EventLedgerProps {
   referralCode?: string | null;
+  referralFingerprint?: string | null;
 }
 
-export function EventLedger({ referralCode }: EventLedgerProps): React.JSX.Element {
+export function EventLedger({ referralCode, referralFingerprint }: EventLedgerProps): React.JSX.Element {
   const { colors } = useAppTheme();
   const reducedMotion = useReducedMotion();
   const { events } = useReferralRuntime();
-  const scopedEvents = scopeReferralEntries(events, referralCode);
+  const scopedEvents = scopeReferralEntries(events, referralCode, referralFingerprint);
   const scopedCode = referralCode ?? scopedEvents[0]?.event.properties.referral_code;
   const completedNames = scopedCode
-    ? getAcceptedReferralMilestones(scopedEvents, scopedCode)
+    ? getAcceptedReferralMilestones(scopedEvents, scopedCode, referralFingerprint)
     : new Set();
   const completedCount = REQUIRED_REFERRAL_EVENTS.filter((name) => completedNames.has(name)).length;
   const [counterScale] = useState(() => new Animated.Value(1));
@@ -98,7 +99,7 @@ export function EventLedger({ referralCode }: EventLedgerProps): React.JSX.Eleme
           <Text style={[styles.counterText, { color: colors.accentStrong }]}>{completedCount}/5</Text>
         </Animated.View>
       </View>
-      <Text style={[styles.description, { color: colors.inkMuted }]}>Every milestone shown here is scoped to one referral code.</Text>
+      <Text style={[styles.description, { color: colors.inkMuted }]}>Invitee milestones are scoped to this exact referral journey.</Text>
 
       <View style={[styles.progressTrack, { backgroundColor: colors.surfaceMuted }]}>
         <View

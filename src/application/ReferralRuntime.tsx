@@ -18,6 +18,7 @@ import { createMockReferralApi } from '../services/referrals/mockReferralApi';
 import { createShareService } from '../services/share/shareService';
 import { referralStorage } from '../services/storage/referralStorage';
 
+import { createJourneySnapshotGuard } from './journeySnapshotGuard';
 import { ReferralCoordinator } from './ReferralCoordinator';
 
 import type { PlatformName, ReferralEventRecord } from '../domain/analytics';
@@ -63,13 +64,17 @@ export function ReferralRuntimeProvider({ children }: PropsWithChildren): React.
 
   useEffect(() => {
     let sequence = 0;
+    const snapshotGuard = createJourneySnapshotGuard();
     const unsubscribe = runtime.tracker.subscribe((event, delivery) => {
       sequence += 1;
       setEvents((current) => [{ event, delivery, sequence }, ...current].slice(0, 30));
     });
     const unsubscribeJourney = runtime.coordinator.subscribeToJourney((attribution) => {
+      const isCurrentSnapshot = snapshotGuard.begin(attribution.fingerprint);
       void runtime.tracker.getAcceptedJourneySnapshot(attribution).then((snapshot) => {
+        if (!isCurrentSnapshot()) return;
         setEvents((current) => {
+          if (!isCurrentSnapshot()) return current;
           const knownEventIds = new Set(
             current.map(({ event }) => event.properties.event_id),
           );
@@ -85,6 +90,7 @@ export function ReferralRuntimeProvider({ children }: PropsWithChildren): React.
     });
     runtime.coordinator.start();
     return () => {
+      snapshotGuard.dispose();
       unsubscribe();
       unsubscribeJourney();
       runtime.coordinator.stop();

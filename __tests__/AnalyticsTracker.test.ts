@@ -7,6 +7,7 @@ import { AnalyticsTracker } from '../src/services/analytics/AnalyticsTracker';
 import type { AnalyticsClient, ReferralEventRecord } from '../src/domain/analytics';
 import type { ReferralAttribution } from '../src/domain/referral';
 import type {
+  AcceptedReferralOutcome,
   ReferralAcceptanceReceipt,
   ReferralStorage,
 } from '../src/services/storage/referralStorage';
@@ -82,6 +83,10 @@ class TrackerStorage implements ReferralStorage {
   ): Promise<ReferralAcceptanceReceipt> {
     return receipt;
   }
+  async getAcceptedReferralOutcome(): Promise<AcceptedReferralOutcome | null> {
+    return null;
+  }
+  async saveAcceptedReferralOutcome(_outcome: AcceptedReferralOutcome): Promise<void> {}
   async resetDemoState(): Promise<void> {}
 }
 
@@ -388,6 +393,7 @@ describe('AnalyticsTracker', () => {
       getAcceptedReferralMilestones(
         snapshot.map((event) => ({ event, delivery: 'accepted' as const })),
         CODE,
+        journey.fingerprint,
       ).size,
     ).toBe(3);
     expect(client.attempts).toHaveLength(attemptsBeforeRestart);

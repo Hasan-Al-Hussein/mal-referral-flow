@@ -55,7 +55,7 @@ Useful edge-case checks:
 - [x] Direct and deferred attribution through one strict parser/coordinator path
 - [x] Referral code pre-applied and locked during referred onboarding
 - [x] Pending attribution persisted before analytics or navigation
-- [x] Full originating attribution identity (code, fingerprint, timestamp) frozen once signup begins
+- [x] Full originating attribution identity (code, SHA-256-derived 128-bit fingerprint, timestamp) frozen once signup begins
 - [x] Durable callback and funnel-milestone deduplication
 - [x] Serialized callback/signup transitions and validated 30-day pending-attribution recovery
 - [x] All five required funnel events with referral code and platform context
@@ -70,7 +70,9 @@ Useful edge-case checks:
 - [x] Mock signup acceptance and deterministic `+fail` rejection fixture
 - [x] Stable mock signup idempotency keys and persisted non-PII acceptance receipts
 - [x] Atomic mock receipt creation across API instances and canonical case/whitespace handling
-- [x] Reset lifecycle epochs that isolate delayed old writes from a fresh journey
+- [x] Durable reset epochs with serialized pointer publication, stale-writer repair, and retired-namespace cleanup
+- [x] Legacy unscoped-state migration and canonical physical cleanup of malformed local records
+- [x] Retained accepted-outcome recovery from backend receipt through analytics, cleanup, and navigation cuts
 - [x] Persisted, journey-scoped accepted-milestone hydration after a cold restart
 - [x] CI entry point for type checking, linting, tests, and a web export
 
@@ -227,8 +229,8 @@ npx serve dist
 The web link adapter also accepts a review URL directly. Replace the host with the local or deployed origin:
 
 ```text
-https://hasan-al-hussein.github.io/mal-referral-flow/?referral_code=MAL-H7K9P2Q4&click_ts=review-001
-https://hasan-al-hussein.github.io/mal-referral-flow/?referral_code=MAL-H7K9P2Q4&click_ts=review-002&deferred=1
+https://hasan-al-hussein.github.io/mal-referral-flow/?referral_code=MAL-H7K9P2Q4&click_ts=1774958400
+https://hasan-al-hussein.github.io/mal-referral-flow/?referral_code=MAL-H7K9P2Q4&click_ts=1774958401&deferred=1
 ```
 
 The second URL exercises the **deferred callback state** in the browser. It does not emulate an app-store install and is labeled accordingly in the UI and analytics as `demo-deferred`.
@@ -278,14 +280,17 @@ Copy-Item .env.example .env.local
 | --- | --- | --- |
 | `NATIVE_SDK_BUILD=1` | Any native provider build | Enables native config plugins and build-time settings |
 | `NATIVE_BUILD_PLATFORM` | Local config/prebuild | `android`, `ios`, or `all`; EAS profiles set it per platform because `EAS_BUILD_PLATFORM` is worker-only |
-| `EXPO_PUBLIC_BRANCH_KEY` | Branch native build | Branch test/live key embedded in the app; it is public by design |
+| `BRANCH_ENVIRONMENT` | Branch native build | `test` for development/preview or `live` for production; profiles set this explicitly |
+| `EXPO_PUBLIC_BRANCH_TEST_KEY` | Branch test build | Public `key_test_...` value passed as `testApiKey` with test mode enabled |
+| `EXPO_PUBLIC_BRANCH_LIVE_KEY` | Branch live build | Public `key_live_...` value passed as required `apiKey`; optional in test mode |
+| `EXPO_PUBLIC_BRANCH_KEY` | Legacy compatibility | Public alias accepted as `key_test_...` in test mode or `key_live_...` in live mode |
 | `EXPO_PUBLIC_BRANCH_DOMAIN` | Branch native build | Primary Branch link host, without `https://` |
 | `EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN` | Recommended | Alternate Branch link host used by App/Universal Links |
 | `GOOGLE_SERVICES_JSON` | Android Firebase build | Local path or EAS file-variable path for Android config |
 | `GOOGLE_SERVICES_PLIST` | iOS Firebase build | Local path or EAS file-variable path for iOS config |
 | `EAS_PROJECT_ID` | EAS services | Expo project UUID used by build/update/hosting services |
 
-The config always requires the public Branch key/domain in native mode. Firebase validation is platform-specific: Android needs only the JSON file and iOS needs only the plist. A deliberate `all` probe needs both.
+Native config validates the selected Branch environment and key prefix. Test mode requires a public `key_test_...`, emits `testApiKey`, and explicitly sets `enableTestEnvironment: true`; if no live key is supplied, the test key also fills the plugin's structurally required `apiKey` slot. Live mode requires `key_live_...`, sets `enableTestEnvironment: false`, and never passes `testApiKey`. Firebase validation is platform-specific: Android needs only the JSON file and iOS needs only the plist. A deliberate `all` probe needs both.
 
 Dynamic app config is evaluated in two places. Locally, `EAS_BUILD_PLATFORM` and secret EAS file variables are unavailable, so the committed build profiles set `NATIVE_BUILD_PLATFORM` per platform and config falls back to the conventional ignored files `./google-services.json` or `./GoogleService-Info.plist`. On an EAS worker, `EAS_BUILD_PLATFORM` selects the platform and the matching EAS file variable must resolve to its uploaded temporary path; missing worker credentials fail fast. `expo config --type public` proves only config evaluation. It does not prove config-plugin mods, Prebuild output, native compilation, signing, or SDK startup.
 
@@ -296,7 +301,8 @@ Example `.env.local` shape:
 ```dotenv
 NATIVE_SDK_BUILD=1
 NATIVE_BUILD_PLATFORM=android
-EXPO_PUBLIC_BRANCH_KEY=key_test_REPLACE_ME
+BRANCH_ENVIRONMENT=test
+EXPO_PUBLIC_BRANCH_TEST_KEY=key_test_REPLACE_ME
 EXPO_PUBLIC_BRANCH_DOMAIN=your-app.test-app.link
 EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN=your-app-alternate.test-app.link
 GOOGLE_SERVICES_JSON=./google-services.json
@@ -304,7 +310,7 @@ GOOGLE_SERVICES_PLIST=./GoogleService-Info.plist
 EAS_PROJECT_ID=00000000-0000-0000-0000-000000000000
 ```
 
-Never put a Branch secret, Firebase service-account private key, keystore password, or backend credential in an `EXPO_PUBLIC_*` variable.
+Branch SDK keys are public identifiers embedded in the app. Never put a Branch secret, Firebase service-account private key, keystore password, or backend credential in an `EXPO_PUBLIC_*` variable.
 
 ### 3. Build locally
 
@@ -319,7 +325,7 @@ On macOS with Xcode, use `npx expo run:ios`. Windows cannot compile an iOS binar
 
 ### 4. Build a shareable Android APK with EAS
 
-The committed `preview` profile sets `NATIVE_SDK_BUILD=1`, uses internal distribution, and explicitly produces an APK.
+The committed `development` and `preview` profiles set `BRANCH_ENVIRONMENT=test`; `production` explicitly selects `live`. Preview also sets `NATIVE_SDK_BUILD=1`, uses internal distribution, and produces an APK.
 
 ```bash
 npx eas-cli@latest login
@@ -329,14 +335,14 @@ npx eas-cli@latest init
 The committed profile selects the EAS `preview` environment. Store the public Branch values and the Android Firebase file there:
 
 ```powershell
-npx eas-cli@latest env:set preview --name EXPO_PUBLIC_BRANCH_KEY --value key_test_REPLACE_ME --type string --visibility plaintext
+npx eas-cli@latest env:set preview --name EXPO_PUBLIC_BRANCH_TEST_KEY --value key_test_REPLACE_ME --type string --visibility plaintext
 npx eas-cli@latest env:set preview --name EXPO_PUBLIC_BRANCH_DOMAIN --value your-app.test-app.link --type string --visibility plaintext
 npx eas-cli@latest env:set preview --name EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN --value your-app-alternate.test-app.link --type string --visibility plaintext
 npx eas-cli@latest env:set preview --name GOOGLE_SERVICES_JSON --value .\google-services.json --type file --visibility secret
 npx eas-cli@latest env:set preview --name EAS_PROJECT_ID --value YOUR_EXPO_PROJECT_UUID --type string --visibility plaintext
 ```
 
-For an iOS build, upload `GOOGLE_SERVICES_PLIST` to the selected environment instead. EAS injects a temporary worker path into the environment variable; do not expect a secret file variable to be readable during a local `expo config` command. The local ignored-file fallback exists for that evaluation path. The `development`, `preview`, and `production` profiles explicitly select their same-named EAS environments.
+For production, configure `EXPO_PUBLIC_BRANCH_LIVE_KEY=key_live_...` in the EAS `production` environment. For an iOS build, upload `GOOGLE_SERVICES_PLIST` to the selected environment instead. EAS injects a temporary worker path into the environment variable; do not expect a secret file variable to be readable during a local `expo config` command. The local ignored-file fallback exists for that evaluation path. The `development`, `preview`, and `production` profiles explicitly select their same-named EAS environments.
 
 Build:
 

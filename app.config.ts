@@ -1,25 +1,91 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
-const branchKey = process.env.EXPO_PUBLIC_BRANCH_KEY;
-const branchDomain = process.env.EXPO_PUBLIC_BRANCH_DOMAIN;
-const branchAlternateDomain = process.env.EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN;
-const nativeSdkBuild = process.env.NATIVE_SDK_BUILD === '1';
-const nativeBuildPlatform =
-  process.env.EAS_BUILD_PLATFORM ?? process.env.NATIVE_BUILD_PLATFORM ?? 'all';
-const easBuildWorker = process.env.EAS_BUILD === 'true';
-const googleServicesJson =
-  process.env.GOOGLE_SERVICES_JSON ??
-  (nativeSdkBuild && !easBuildWorker ? './google-services.json' : undefined);
-const googleServicesPlist =
-  process.env.GOOGLE_SERVICES_PLIST ??
-  (nativeSdkBuild && !easBuildWorker ? './GoogleService-Info.plist' : undefined);
-const webBaseUrl = process.env.EXPO_PUBLIC_BASE_URL;
+type BranchEnvironment = 'test' | 'live';
 
-const branchDomains = [branchDomain, branchAlternateDomain].filter(
-  (domain): domain is string => Boolean(domain),
-);
+interface BranchPluginCredentials {
+  apiKey: string;
+  testApiKey?: string;
+  enableTestEnvironment: boolean;
+  environment: BranchEnvironment;
+}
+
+function hasBranchPrefix(value: string | undefined, environment: BranchEnvironment) {
+  return value?.startsWith(`key_${environment}_`) ?? false;
+}
+
+function requireBranchPrefix(
+  value: string | undefined,
+  environment: BranchEnvironment,
+  variableName: string,
+) {
+  if (!hasBranchPrefix(value, environment)) {
+    throw new Error(`${variableName} must start with key_${environment}_.`);
+  }
+  return value as string;
+}
+
+function resolveBranchCredentials(): BranchPluginCredentials {
+  const legacyKey = process.env.EXPO_PUBLIC_BRANCH_KEY;
+  const configuredTestKey = process.env.EXPO_PUBLIC_BRANCH_TEST_KEY;
+  const configuredLiveKey = process.env.EXPO_PUBLIC_BRANCH_LIVE_KEY;
+  const requestedEnvironment = process.env.BRANCH_ENVIRONMENT;
+
+  if (legacyKey && !hasBranchPrefix(legacyKey, 'test') && !hasBranchPrefix(legacyKey, 'live')) {
+    throw new Error('EXPO_PUBLIC_BRANCH_KEY must start with key_test_ or key_live_.');
+  }
+  if (configuredTestKey) {
+    requireBranchPrefix(configuredTestKey, 'test', 'EXPO_PUBLIC_BRANCH_TEST_KEY');
+  }
+  if (configuredLiveKey) {
+    requireBranchPrefix(configuredLiveKey, 'live', 'EXPO_PUBLIC_BRANCH_LIVE_KEY');
+  }
+
+  const environment =
+    requestedEnvironment ??
+    (configuredTestKey || hasBranchPrefix(legacyKey, 'test') ? 'test' : 'live');
+  if (environment !== 'test' && environment !== 'live') {
+    throw new Error('BRANCH_ENVIRONMENT must be test or live.');
+  }
+
+  if (environment === 'test') {
+    const testApiKey = requireBranchPrefix(
+      configuredTestKey ?? (hasBranchPrefix(legacyKey, 'test') ? legacyKey : undefined),
+      'test',
+      'EXPO_PUBLIC_BRANCH_TEST_KEY (or legacy EXPO_PUBLIC_BRANCH_KEY)',
+    );
+    const apiKey =
+      configuredLiveKey ??
+      (hasBranchPrefix(legacyKey, 'live') ? legacyKey : undefined) ??
+      testApiKey;
+
+    return { apiKey, testApiKey, enableTestEnvironment: true, environment };
+  }
+
+  const apiKey = requireBranchPrefix(
+    configuredLiveKey ?? legacyKey,
+    'live',
+    'EXPO_PUBLIC_BRANCH_LIVE_KEY (or legacy EXPO_PUBLIC_BRANCH_KEY)',
+  );
+  return { apiKey, enableTestEnvironment: false, environment };
+}
 
 export default ({ config }: ConfigContext) => {
+  const branchDomain = process.env.EXPO_PUBLIC_BRANCH_DOMAIN;
+  const branchAlternateDomain = process.env.EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN;
+  const nativeSdkBuild = process.env.NATIVE_SDK_BUILD === '1';
+  const nativeBuildPlatform =
+    process.env.EAS_BUILD_PLATFORM ?? process.env.NATIVE_BUILD_PLATFORM ?? 'all';
+  const easBuildWorker = process.env.EAS_BUILD === 'true';
+  const googleServicesJson =
+    process.env.GOOGLE_SERVICES_JSON ??
+    (nativeSdkBuild && !easBuildWorker ? './google-services.json' : undefined);
+  const googleServicesPlist =
+    process.env.GOOGLE_SERVICES_PLIST ??
+    (nativeSdkBuild && !easBuildWorker ? './GoogleService-Info.plist' : undefined);
+  const webBaseUrl = process.env.EXPO_PUBLIC_BASE_URL;
+  const branchDomains = [branchDomain, branchAlternateDomain].filter(
+    (domain): domain is string => Boolean(domain),
+  );
   const plugins: NonNullable<ExpoConfig['plugins']> = ['expo-font'];
   const buildsAndroid = nativeBuildPlatform === 'android' || nativeBuildPlatform === 'all';
   const buildsIos = nativeBuildPlatform === 'ios' || nativeBuildPlatform === 'all';
@@ -30,9 +96,9 @@ export default ({ config }: ConfigContext) => {
     );
   }
 
-  if (nativeSdkBuild && (!branchKey || !branchDomain)) {
+  if (nativeSdkBuild && !branchDomain) {
     throw new Error(
-      'NATIVE_SDK_BUILD=1 requires EXPO_PUBLIC_BRANCH_KEY and EXPO_PUBLIC_BRANCH_DOMAIN.',
+      'NATIVE_SDK_BUILD=1 requires EXPO_PUBLIC_BRANCH_DOMAIN.',
     );
   }
   if (nativeSdkBuild && easBuildWorker && buildsAndroid && !googleServicesJson) {
@@ -45,12 +111,17 @@ export default ({ config }: ConfigContext) => {
       'iOS native SDK builds require GOOGLE_SERVICES_PLIST.',
     );
   }
+  const branchCredentials = nativeSdkBuild ? resolveBranchCredentials() : undefined;
 
-  if (nativeSdkBuild && branchKey && branchDomain) {
+  if (nativeSdkBuild && branchCredentials && branchDomain) {
     plugins.push([
       '@config-plugins/react-native-branch',
       {
-        apiKey: branchKey,
+        apiKey: branchCredentials.apiKey,
+        ...(branchCredentials.testApiKey
+          ? { testApiKey: branchCredentials.testApiKey }
+          : {}),
+        enableTestEnvironment: branchCredentials.enableTestEnvironment,
         iosAppDomain: branchDomain,
         iosUniversalLinkDomains: branchDomains,
       },
@@ -121,7 +192,8 @@ export default ({ config }: ConfigContext) => {
       nativeSdkBuild,
       nativeBuildPlatform,
       easBuildWorker,
-      branchConfigured: Boolean(branchKey && branchDomain),
+      branchConfigured: Boolean(branchCredentials && branchDomain),
+      branchEnvironment: branchCredentials?.environment ?? 'not-configured',
       firebaseConfigured: Boolean(
         (!buildsAndroid || googleServicesJson) && (!buildsIos || googleServicesPlist),
       ),

@@ -16,6 +16,7 @@ import { OnboardingScreen } from './src/screens/OnboardingScreen';
 import { SuccessScreen } from './src/screens/SuccessScreen';
 import { AppThemeProvider, useAppTheme } from './src/theme/theme';
 
+import type { SignupResult } from './src/application/ReferralCoordinator';
 import type { ReferralAttribution } from './src/domain/referral';
 import type { RootStackParamList } from './src/navigation/types';
 
@@ -29,6 +30,11 @@ function AppNavigator(): React.JSX.Element {
   const routeReferral = useCallback((attribution: ReferralAttribution) => {
     if (navigationRef.isReady()) {
       navigationRef.navigate('Onboarding', { attribution });
+    }
+  }, []);
+  const routeAccepted = useCallback((result: SignupResult) => {
+    if (navigationRef.isReady()) {
+      navigationRef.reset({ index: 0, routes: [{ name: 'Success', params: result }] });
     }
   }, []);
   const navigationTheme = {
@@ -47,7 +53,7 @@ function AppNavigator(): React.JSX.Element {
     <NavigationContainer
       ref={navigationRef}
       theme={navigationTheme}
-      onReady={() => coordinator.setNavigator(routeReferral)}
+      onReady={() => coordinator.setNavigator(routeReferral, routeAccepted)}
     >
       <StatusBar style={isDark ? 'light' : 'dark'} />
       <Stack.Navigator

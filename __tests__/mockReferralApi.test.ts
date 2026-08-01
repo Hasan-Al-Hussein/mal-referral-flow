@@ -5,6 +5,7 @@ import { createMockReferralApi } from '../src/services/referrals/mockReferralApi
 import type { ReferralEventRecord } from '../src/domain/analytics';
 import type { ReferralAttribution } from '../src/domain/referral';
 import type {
+  AcceptedReferralOutcome,
   ReferralAcceptanceReceipt,
   ReferralStorage,
 } from '../src/services/storage/referralStorage';
@@ -79,6 +80,10 @@ class ApiStorage implements ReferralStorage {
     return event;
   }
   async removePendingAnalyticsEvent(_eventId: string): Promise<void> {}
+  async getAcceptedReferralOutcome(): Promise<AcceptedReferralOutcome | null> {
+    return null;
+  }
+  async saveAcceptedReferralOutcome(_outcome: AcceptedReferralOutcome): Promise<void> {}
   async resetDemoState(): Promise<void> {}
 }
 

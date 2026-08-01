@@ -1,13 +1,21 @@
-import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import { createHash } from 'node:crypto';
 
-import { ReferralCoordinator } from '../src/application/ReferralCoordinator';
+import { afterAll, afterEach, beforeAll, describe, expect, it, jest } from '@jest/globals';
+import * as Crypto from 'expo-crypto';
+
+import { commitDemoReset } from '../src/application/commitDemoReset';
+import {
+  isReferralLifecycleCancelled,
+  ReferralCoordinator,
+  type SignupResult,
+} from '../src/application/ReferralCoordinator';
 import {
   REFERRAL_DESTINATION,
-  parseReferralAttribution,
   type RawDeepLinkEvent,
   type ReferralAttribution,
 } from '../src/domain/referral';
 import { AnalyticsTracker } from '../src/services/analytics/AnalyticsTracker';
+import { withTimeout } from '../src/services/operationTimeout';
 
 import type {
   AnalyticsClient,
@@ -18,6 +26,7 @@ import type { DeepLinkService } from '../src/services/deepLinks/deepLinkService'
 import type { MockReferralApi } from '../src/services/referrals/mockReferralApi';
 import type { ShareResult, ShareService } from '../src/services/share/shareService';
 import type {
+  AcceptedReferralOutcome,
   ReferralAcceptanceReceipt,
   ReferralStorage,
 } from '../src/services/storage/referralStorage';
@@ -26,6 +35,16 @@ const CODE_A = 'MAL-ABCD2345';
 const CODE_B = 'MAL-ZYXW9876';
 const FIXED_NOW = new Date('2026-07-31T12:00:00.000Z');
 
+beforeAll(() => {
+  jest.spyOn(Crypto, 'digestStringAsync').mockImplementation(async (_algorithm, value) =>
+    createHash('sha256').update(value).digest('hex'),
+  );
+});
+
+afterAll(() => {
+  jest.restoreAllMocks();
+});
+
 class MemoryStorage implements ReferralStorage {
   readonly operations: string[];
   readonly processedAttributions = new Set<string>();
@@ -33,11 +52,22 @@ class MemoryStorage implements ReferralStorage {
   readonly acceptedAnalyticsEvents: ReferralEventRecord[] = [];
   readonly pendingAnalyticsEvents = new Map<string, ReferralEventRecord>();
   readonly signupReceipts = new Map<string, ReferralAcceptanceReceipt>();
+  acceptedOutcome: AcceptedReferralOutcome | null = null;
+  resetCleanupGate: Promise<void> | undefined;
   getPendingError: Error | undefined;
   savePendingError: Error | undefined;
   completeJourneyFailuresRemaining = 0;
   savePendingGate: Promise<void> | undefined;
   onSavePendingStart: (() => void) | undefined;
+  freezeGate: Promise<void> | undefined;
+  onFreezeStart: (() => void) | undefined;
+  markProcessedGate: Promise<void> | undefined;
+  completeJourneyGate: Promise<void> | undefined;
+  onCompleteJourneyStart: (() => void) | undefined;
+  reservePendingAnalyticsError: Error | undefined;
+  saveAcceptedOutcomeError: Error | undefined;
+  saveAcceptedOutcomeGate: Promise<void> | undefined;
+  analyticsStorageDelayMs = 0;
   resetGate: Promise<void> | undefined;
   private readonly generatedCodes = new Map<string, string>();
   private pendingAttribution: ReferralAttribution | null = null;
@@ -81,11 +111,15 @@ class MemoryStorage implements ReferralStorage {
   }
 
   async freezeAttribution(attribution: ReferralAttribution): Promise<void> {
+    this.onFreezeStart?.();
+    if (this.freezeGate) await this.freezeGate;
     this.operations.push('storage:freeze-attribution');
     this.frozenAttribution = attribution;
   }
 
   async completeReferralJourney(attribution: ReferralAttribution): Promise<void> {
+    this.onCompleteJourneyStart?.();
+    if (this.completeJourneyGate) await this.completeJourneyGate;
     this.operations.push('storage:complete-journey');
     if (this.completeJourneyFailuresRemaining > 0) {
       this.completeJourneyFailuresRemaining -= 1;
@@ -103,15 +137,18 @@ class MemoryStorage implements ReferralStorage {
   }
 
   async markAttributionProcessed(fingerprint: string): Promise<void> {
+    if (this.markProcessedGate) await this.markProcessedGate;
     this.operations.push('storage:mark-processed');
     this.processedAttributions.add(fingerprint);
   }
 
   async hasMilestone(key: string): Promise<boolean> {
+    await this.delayAnalyticsStorage();
     return this.milestones.has(key);
   }
 
   async markMilestone(key: string, event: ReferralEventRecord): Promise<void> {
+    await this.delayAnalyticsStorage();
     this.operations.push('storage:mark-milestone');
     this.milestones.add(key);
     this.acceptedAnalyticsEvents.push(event);
@@ -126,6 +163,8 @@ class MemoryStorage implements ReferralStorage {
   }
 
   async reservePendingAnalyticsEvent(event: ReferralEventRecord): Promise<ReferralEventRecord> {
+    await this.delayAnalyticsStorage();
+    if (this.reservePendingAnalyticsError) throw this.reservePendingAnalyticsError;
     const existing = [...this.pendingAnalyticsEvents.values()].find(
       (candidate) =>
         candidate.name === event.name &&
@@ -138,6 +177,7 @@ class MemoryStorage implements ReferralStorage {
   }
 
   async removePendingAnalyticsEvent(eventId: string): Promise<void> {
+    await this.delayAnalyticsStorage();
     this.operations.push('storage:remove-analytics');
     this.pendingAnalyticsEvents.delete(eventId);
   }
@@ -156,7 +196,26 @@ class MemoryStorage implements ReferralStorage {
     return receipt;
   }
 
-  async resetDemoState(): Promise<void> {
+  async getAcceptedReferralOutcome(): Promise<AcceptedReferralOutcome | null> {
+    return this.acceptedOutcome;
+  }
+
+  async saveAcceptedReferralOutcome(outcome: AcceptedReferralOutcome): Promise<void> {
+    if (this.saveAcceptedOutcomeGate) await this.saveAcceptedOutcomeGate;
+    if (this.saveAcceptedOutcomeError) throw this.saveAcceptedOutcomeError;
+    this.acceptedOutcome = outcome;
+  }
+
+  private async delayAnalyticsStorage(): Promise<void> {
+    if (this.analyticsStorageDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.analyticsStorageDelayMs));
+    }
+  }
+
+  async resetDemoState(timeoutMs = 5_000): Promise<void> {
+    if (this.resetGate) {
+      await withTimeout(this.resetGate, 'active referral epoch publication', timeoutMs);
+    }
     this.epoch += 1;
     this.generatedCodes.clear();
     this.pendingAttribution = null;
@@ -166,7 +225,18 @@ class MemoryStorage implements ReferralStorage {
     this.acceptedAnalyticsEvents.length = 0;
     this.pendingAnalyticsEvents.clear();
     this.signupReceipts.clear();
-    if (this.resetGate) await this.resetGate;
+    this.acceptedOutcome = null;
+    if (this.resetCleanupGate) {
+      try {
+        await withTimeout(
+          this.resetCleanupGate,
+          'retired referral epoch cleanup',
+          timeoutMs,
+        );
+      } catch {
+        // Cleanup follows the durable commit and is non-critical.
+      }
+    }
   }
 }
 
@@ -175,12 +245,16 @@ class MemoryAnalyticsClient implements AnalyticsClient {
   readonly events: ReferralEventRecord[] = [];
   readonly failingEvents = new Set<ReferralEventName>();
   gate: Promise<void> | undefined;
+  delayMs = 0;
 
   constructor(private readonly operations: string[]) {}
 
   async logEvent(event: ReferralEventRecord): Promise<void> {
     this.operations.push(`analytics:${event.name}`);
     this.attempts.push(event);
+    if (this.delayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.delayMs));
+    }
     if (this.gate) await this.gate;
     if (this.failingEvents.has(event.name)) throw new Error('Analytics unavailable');
     this.events.push(event);
@@ -281,9 +355,13 @@ interface Harness {
   operations: string[];
 }
 
-function createHarness(timeoutMs = 10_000): Harness {
+function createHarness(
+  timeoutMs = 10_000,
+  createEventId?: () => string,
+  existingStorage?: MemoryStorage,
+): Harness {
   const operations: string[] = [];
-  const storage = new MemoryStorage(operations);
+  const storage = existingStorage ?? new MemoryStorage(operations);
   const analyticsClient = new MemoryAnalyticsClient(operations);
   let eventSequence = 0;
   const analytics = new AnalyticsTracker(
@@ -291,10 +369,10 @@ function createHarness(timeoutMs = 10_000): Harness {
     storage,
     'android',
     () => FIXED_NOW,
-    () => {
+    createEventId ?? (() => {
       eventSequence += 1;
       return eventSequence.toString(16).padStart(32, '0');
-    },
+    }),
     timeoutMs,
   );
   const deepLinks = new FakeDeepLinkService();
@@ -334,13 +412,42 @@ function validBranchEvent(deferred = false, referralCode = CODE_A): RawDeepLinkE
 }
 
 function attributionFor(referralCode = CODE_A, deferred = false): ReferralAttribution {
-  const parsed = parseReferralAttribution(validBranchEvent(deferred, referralCode), () => FIXED_NOW);
-  if (parsed.status !== 'accepted') throw new Error('Test setup did not produce an attribution');
-  return parsed.attribution;
+  const kind = deferred ? 'deferred' : 'direct';
+  const uri = `https://mal.test-app.link/r/${referralCode}`;
+  const fingerprintInput = [referralCode, '1774958400', uri, kind].join('|');
+  return {
+    referralCode,
+    destination: REFERRAL_DESTINATION,
+    kind,
+    fingerprint: `fp_${createHash('sha256').update(fingerprintInput).digest('hex').slice(0, 32)}`,
+    uri,
+    receivedAt: FIXED_NOW.toISOString(),
+  };
 }
 
 function eventsNamed(client: MemoryAnalyticsClient, name: ReferralEventName): ReferralEventRecord[] {
   return client.events.filter((event) => event.name === name);
+}
+
+function completedEvent(
+  attribution: ReferralAttribution,
+  eventId = 'evt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+): ReferralEventRecord {
+  return {
+    name: 'referral_signup_completed',
+    properties: {
+      referral_code: attribution.referralCode,
+      platform: 'android',
+      event_id: eventId,
+      flow_id: `invitee:${attribution.fingerprint}`,
+      occurred_at_utc: FIXED_NOW.toISOString(),
+      schema_version: 1,
+      app_version: '1.0.0',
+      attribution_kind: attribution.kind,
+      is_first_session:
+        attribution.kind === 'deferred' || attribution.kind === 'demo-deferred',
+    },
+  };
 }
 
 async function settleAsyncWork(): Promise<void> {
@@ -545,7 +652,11 @@ describe('ReferralCoordinator', () => {
         idempotencyKey: `signup:${attribution.fingerprint}`,
       },
     ]);
-    expect(result).toEqual({ accountId: 'acct_test123', referralCode: CODE_A });
+    expect(result).toEqual({
+      accountId: 'acct_test123',
+      referralCode: CODE_A,
+      referralFingerprint: attribution.fingerprint,
+    });
     await expect(storage.getPendingAttribution()).resolves.toBeNull();
     await expect(storage.getFrozenAttribution()).resolves.toBeNull();
   });
@@ -655,7 +766,11 @@ describe('ReferralCoordinator', () => {
 
     await expect(
       coordinator.completeSignup(CODE_A, 'accepted@example.com', attribution),
-    ).resolves.toEqual({ accountId: 'acct_test123', referralCode: CODE_A });
+    ).resolves.toEqual({
+      accountId: 'acct_test123',
+      referralCode: CODE_A,
+      referralFingerprint: attribution.fingerprint,
+    });
     expect(eventsNamed(analyticsClient, 'referral_signup_completed')).toHaveLength(1);
     expect(eventsNamed(analyticsClient, 'referral_signup_failed')).toHaveLength(0);
     expect(eventsNamed(analyticsClient, 'referral_state_cleanup_failed')).toHaveLength(1);
@@ -666,6 +781,325 @@ describe('ReferralCoordinator', () => {
     await settleAsyncWork();
     await expect(storage.getPendingAttribution()).resolves.toBeNull();
     await expect(storage.getFrozenAttribution()).resolves.toBeNull();
+  });
+
+  it('serializes link intake behind signup freeze so a competing journey cannot replace or route', async () => {
+    const { coordinator, storage, analyticsClient } = createHarness();
+    const attributionA = attributionFor(CODE_A);
+    await storage.savePendingAttribution(attributionA);
+    const freezeStarted = deferred();
+    const releaseFreeze = deferred();
+    storage.onFreezeStart = freezeStarted.resolve;
+    storage.freezeGate = releaseFreeze.promise;
+    const navigated: ReferralAttribution[] = [];
+    coordinator.setNavigator((attribution) => navigated.push(attribution));
+
+    const signupStart = coordinator.beginSignup(CODE_A, attributionA);
+    await freezeStarted.promise;
+    const competingLink = coordinator.handleDeepLink(validBranchEvent(false, CODE_B));
+    await settleAsyncWork();
+    expect(navigated).toHaveLength(0);
+
+    releaseFreeze.resolve();
+    await expect(signupStart).resolves.toBe(CODE_A);
+    await expect(competingLink).resolves.toBeUndefined();
+
+    await expect(storage.getPendingAttribution()).resolves.toEqual(attributionA);
+    await expect(storage.getFrozenAttribution()).resolves.toEqual(attributionA);
+    expect(navigated).toHaveLength(0);
+    expect(eventsNamed(analyticsClient, 'referral_code_rejected')[0]?.properties).toMatchObject({
+      referral_code: CODE_B,
+      reason: 'signup_referral_already_frozen',
+    });
+  });
+
+  it.each([
+    'uuid',
+    'outbox',
+  ] as const)('returns the same accepted receipt when completion %s instrumentation fails', async (failure) => {
+    let failEventIds = false;
+    let sequence = 0;
+    const { coordinator, storage, analyticsClient, referralApi } = createHarness(
+      10_000,
+      () => {
+        if (failEventIds) throw new Error('UUID unavailable');
+        sequence += 1;
+        return sequence.toString(16).padStart(32, '0');
+      },
+    );
+    const attribution = attributionFor();
+    await coordinator.handleDeepLink(validBranchEvent());
+    await coordinator.beginSignup(CODE_A, attribution);
+    if (failure === 'uuid') failEventIds = true;
+    else storage.reservePendingAnalyticsError = new Error('outbox unavailable');
+
+    const first = await coordinator.completeSignup(CODE_A, 'accepted@example.com', attribution);
+    failEventIds = false;
+    storage.reservePendingAnalyticsError = undefined;
+    const retry = await coordinator.completeSignup(CODE_A, 'accepted@example.com', attribution);
+
+    expect(first).toEqual(retry);
+    expect(first.accountId).toBe('acct_test123');
+    expect(storage.signupReceipts.size).toBe(1);
+    expect(new Set([...storage.signupReceipts.values()].map(({ accountId }) => accountId))).toEqual(
+      new Set(['acct_test123']),
+    );
+    expect(eventsNamed(analyticsClient, 'referral_signup_failed')).toHaveLength(0);
+    expect(referralApi.acceptedReferrals).toHaveLength(2);
+  });
+
+  it('returns accepted success after completion analytics times out and retries the same receipt', async () => {
+    jest.useFakeTimers();
+    const { coordinator, analyticsClient, storage } = createHarness(50);
+    const attribution = attributionFor();
+    await coordinator.handleDeepLink(validBranchEvent());
+    await coordinator.beginSignup(CODE_A, attribution);
+    analyticsClient.gate = new Promise<void>(() => undefined);
+
+    const completion = coordinator.completeSignup(CODE_A, 'accepted@example.com', attribution);
+    await jest.advanceTimersByTimeAsync(50);
+    await expect(completion).resolves.toMatchObject({ accountId: 'acct_test123' });
+    expect(eventsNamed(analyticsClient, 'referral_signup_failed')).toHaveLength(0);
+
+    analyticsClient.gate = undefined;
+    await expect(
+      coordinator.completeSignup(CODE_A, 'accepted@example.com', attribution),
+    ).resolves.toMatchObject({ accountId: 'acct_test123' });
+    expect(storage.signupReceipts.size).toBe(1);
+  });
+
+  it('keeps generate, share, start, and complete successful when analytics stages are individually in budget', async () => {
+    jest.useFakeTimers();
+    const { coordinator, storage, analyticsClient } = createHarness(50);
+    storage.analyticsStorageDelayMs = 30;
+    analyticsClient.delayMs = 30;
+
+    const generation = coordinator.generateReferral('authenticated-user');
+    await jest.advanceTimersByTimeAsync(250);
+    const generated = await generation;
+
+    const sharing = coordinator.shareReferral(generated);
+    await jest.advanceTimersByTimeAsync(250);
+    await expect(sharing).resolves.toMatchObject({ status: 'shared' });
+
+    const intake = coordinator.handleDeepLink(validBranchEvent());
+    await jest.advanceTimersByTimeAsync(250);
+    await intake;
+    const attribution = attributionFor();
+
+    const start = coordinator.beginSignup(CODE_A, attribution);
+    await jest.advanceTimersByTimeAsync(250);
+    await expect(start).resolves.toBe(CODE_A);
+
+    const completion = coordinator.completeSignup(CODE_A, 'accepted@example.com', attribution);
+    await jest.advanceTimersByTimeAsync(250);
+    await expect(completion).resolves.toMatchObject({ accountId: 'acct_test123' });
+    expect(eventsNamed(analyticsClient, 'referral_signup_failed')).toHaveLength(0);
+  });
+
+  it('routes once when a processed marker times out, lands late, and the callback retries warm', async () => {
+    jest.useFakeTimers();
+    const { coordinator, storage, analyticsClient } = createHarness(50);
+    const markerGate = deferred();
+    storage.markProcessedGate = markerGate.promise;
+    const navigated: ReferralAttribution[] = [];
+    coordinator.setNavigator((attribution) => navigated.push(attribution));
+
+    const first = coordinator.handleDeepLink(validBranchEvent()).catch((error: unknown) => error);
+    await jest.advanceTimersByTimeAsync(50);
+    await expect(first).resolves.toBeInstanceOf(Error);
+    expect(navigated).toHaveLength(1);
+
+    markerGate.resolve();
+    await jest.advanceTimersByTimeAsync(0);
+    storage.markProcessedGate = undefined;
+    await coordinator.handleDeepLink(validBranchEvent());
+
+    expect(navigated).toHaveLength(1);
+    expect(eventsNamed(analyticsClient, 'referral_link_clicked')).toHaveLength(1);
+    expect(eventsNamed(analyticsClient, 'referral_duplicate_suppressed')).toHaveLength(1);
+  });
+
+  it('continues outbox flush and pending-route recovery when provider subscription throws', async () => {
+    const { coordinator, storage, analyticsClient, deepLinks } = createHarness();
+    const pending = attributionFor();
+    await storage.savePendingAttribution(pending);
+    const queued = completedEvent(pending);
+    storage.pendingAnalyticsEvents.set(queued.properties.event_id, queued);
+    deepLinks.subscribeError = new Error('native Branch unavailable');
+    const navigated: ReferralAttribution[] = [];
+    coordinator.setNavigator((attribution) => navigated.push(attribution));
+
+    coordinator.start();
+    await settleAsyncWork();
+    await settleAsyncWork();
+
+    expect(navigated).toEqual([pending]);
+    expect(analyticsClient.events).toContainEqual(queued);
+    expect(
+      eventsNamed(analyticsClient, 'referral_deeplink_resolution_failed')[0]?.properties.reason,
+    ).toBe('subscription_failed');
+  });
+
+  it('bounds a hung fingerprint digest and reset opens a fresh journey queue', async () => {
+    jest.useFakeTimers();
+    const { coordinator, deepLinks, analyticsClient } = createHarness(50);
+    const navigated: ReferralAttribution[] = [];
+    coordinator.setNavigator((attribution) => navigated.push(attribution));
+    coordinator.start();
+    jest.mocked(Crypto.digestStringAsync).mockImplementationOnce(
+      () => new Promise<string>(() => undefined),
+    );
+
+    deepLinks.emit(validBranchEvent());
+    await jest.advanceTimersByTimeAsync(50);
+    await Promise.resolve();
+    expect(
+      eventsNamed(analyticsClient, 'referral_deeplink_resolution_failed').some(
+        ({ properties }) => properties.reason === 'callback_processing_failed',
+      ),
+    ).toBe(true);
+    expect(navigated).toHaveLength(0);
+
+    await coordinator.resetDemoState();
+    deepLinks.emit(validBranchEvent());
+    await jest.runAllTimersAsync();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(navigated).toHaveLength(1);
+  });
+
+  it('recovers Success after a post-receipt/pre-analytics restart without another account', async () => {
+    const storage = new MemoryStorage();
+    const attribution = attributionFor();
+    await storage.savePendingAttribution(attribution);
+    await storage.freezeAttribution(attribution);
+    await storage.createSignupReceipt(`signup:${attribution.fingerprint}`, {
+      accountId: 'acct_test123',
+      referralCode: CODE_A,
+    });
+    const restarted = createHarness(10_000, undefined, storage);
+    const recovered: SignupResult[] = [];
+    restarted.coordinator.setNavigator(() => undefined, (result) => recovered.push(result));
+
+    restarted.coordinator.start();
+    await settleAsyncWork();
+    await settleAsyncWork();
+
+    expect(recovered).toEqual([
+      {
+        accountId: 'acct_test123',
+        referralCode: CODE_A,
+        referralFingerprint: attribution.fingerprint,
+      },
+    ]);
+    expect(eventsNamed(restarted.analyticsClient, 'referral_signup_completed')).toHaveLength(1);
+    expect(restarted.referralApi.acceptedReferrals).toHaveLength(0);
+    await expect(storage.getPendingAttribution()).resolves.toBeNull();
+  });
+
+  it('recovers Success after analytics/pre-cleanup restart without duplicate delivery', async () => {
+    const storage = new MemoryStorage();
+    const attribution = attributionFor();
+    const event = completedEvent(attribution);
+    await storage.savePendingAttribution(attribution);
+    await storage.freezeAttribution(attribution);
+    await storage.createSignupReceipt(`signup:${attribution.fingerprint}`, {
+      accountId: 'acct_test123',
+      referralCode: CODE_A,
+    });
+    await storage.markMilestone(`${event.properties.flow_id}:${event.name}`, event);
+    const restarted = createHarness(10_000, undefined, storage);
+    const recovered: SignupResult[] = [];
+    restarted.coordinator.setNavigator(() => undefined, (result) => recovered.push(result));
+
+    restarted.coordinator.start();
+    await settleAsyncWork();
+    await settleAsyncWork();
+
+    expect(recovered).toHaveLength(1);
+    expect(eventsNamed(restarted.analyticsClient, 'referral_signup_completed')).toHaveLength(0);
+    expect(storage.acceptedAnalyticsEvents.filter(({ name }) => name === event.name)).toHaveLength(1);
+    expect(restarted.referralApi.acceptedReferrals).toHaveLength(0);
+  });
+
+  it('recovers Success from a retained outcome after cleanup/pre-navigation restart', async () => {
+    const storage = new MemoryStorage();
+    const attribution = attributionFor();
+    const event = completedEvent(attribution);
+    await storage.savePendingAttribution(attribution);
+    await storage.freezeAttribution(attribution);
+    await storage.createSignupReceipt(`signup:${attribution.fingerprint}`, {
+      accountId: 'acct_test123',
+      referralCode: CODE_A,
+    });
+    await storage.saveAcceptedReferralOutcome({
+      accountId: 'acct_test123',
+      referralCode: CODE_A,
+      attribution,
+    });
+    await storage.markMilestone(`${event.properties.flow_id}:${event.name}`, event);
+    await storage.completeReferralJourney(attribution);
+    const restarted = createHarness(10_000, undefined, storage);
+    const recovered: SignupResult[] = [];
+    restarted.coordinator.setNavigator(() => undefined, (result) => recovered.push(result));
+
+    restarted.coordinator.start();
+    await settleAsyncWork();
+    await settleAsyncWork();
+
+    expect(recovered).toHaveLength(1);
+    expect(eventsNamed(restarted.analyticsClient, 'referral_signup_completed')).toHaveLength(0);
+    expect(restarted.referralApi.acceptedReferrals).toHaveLength(0);
+  });
+
+  it('cancels stale navigable success when reset occurs during post-commit analytics', async () => {
+    const { coordinator, storage, analyticsClient, referralApi } = createHarness();
+    const attribution = attributionFor();
+    await coordinator.handleDeepLink(validBranchEvent());
+    await coordinator.beginSignup(CODE_A, attribution);
+    const analyticsGate = deferred();
+    analyticsClient.gate = analyticsGate.promise;
+    const navigable: SignupResult[] = [];
+    const completion = coordinator
+      .completeSignup(CODE_A, 'accepted@example.com', attribution)
+      .then((result) => navigable.push(result))
+      .catch((error: unknown) => error);
+    await settleAsyncWork();
+
+    await coordinator.resetDemoState();
+    analyticsGate.resolve();
+
+    const outcome = await completion;
+    expect(isReferralLifecycleCancelled(outcome)).toBe(true);
+    expect(navigable).toHaveLength(0);
+    expect(referralApi.acceptedReferrals).toHaveLength(1);
+    expect(storage.acceptedOutcome).toBeNull();
+  });
+
+  it('cancels stale navigable success when reset occurs during post-commit cleanup', async () => {
+    const { coordinator, storage, referralApi } = createHarness();
+    const attribution = attributionFor();
+    await coordinator.handleDeepLink(validBranchEvent());
+    await coordinator.beginSignup(CODE_A, attribution);
+    const cleanupStarted = deferred();
+    const cleanupGate = deferred();
+    storage.onCompleteJourneyStart = cleanupStarted.resolve;
+    storage.completeJourneyGate = cleanupGate.promise;
+    const navigable: SignupResult[] = [];
+    const completion = coordinator
+      .completeSignup(CODE_A, 'accepted@example.com', attribution)
+      .then((result) => navigable.push(result))
+      .catch((error: unknown) => error);
+    await cleanupStarted.promise;
+
+    await coordinator.resetDemoState();
+    cleanupGate.resolve();
+
+    const outcome = await completion;
+    expect(isReferralLifecycleCancelled(outcome)).toBe(true);
+    expect(navigable).toHaveLength(0);
+    expect(referralApi.acceptedReferrals).toHaveLength(1);
   });
 
   it('rejects same-code attribution substitution with a different fingerprint', async () => {
@@ -905,19 +1339,39 @@ describe('ReferralCoordinator', () => {
     expect(eventsNamed(analyticsClient, 'referral_signup_failed')).toHaveLength(0);
   });
 
-  it('recovers from a never-settling reset dependency within the configured timeout', async () => {
+  it('surfaces a never-settling reset dependency and recovers on an explicit retry', async () => {
     jest.useFakeTimers();
     const { coordinator, storage } = createHarness(50);
     storage.resetGate = new Promise<void>(() => undefined);
 
-    const reset = coordinator.resetDemoState();
+    const reset = coordinator.resetDemoState().catch((error: unknown) => error);
     await jest.advanceTimersByTimeAsync(50);
-    await expect(reset).resolves.toBeUndefined();
+    await expect(reset).resolves.toBeInstanceOf(Error);
 
+    await expect(coordinator.handleDeepLink(validBranchEvent())).rejects.toThrow(
+      'active referral epoch publication timed out',
+    );
+
+    storage.resetGate = undefined;
+    await expect(coordinator.resetDemoState()).resolves.toBeUndefined();
     await expect(coordinator.handleDeepLink(validBranchEvent())).resolves.toBeUndefined();
     await expect(storage.getPendingAttribution()).resolves.toMatchObject({
       referralCode: CODE_A,
     });
+  });
+
+  it('does not cumulatively time out a committed reset with slow publication and hung cleanup', async () => {
+    jest.useFakeTimers();
+    const { coordinator, storage } = createHarness(50);
+    storage.resetGate = new Promise<void>((resolve) => setTimeout(resolve, 40));
+    storage.resetCleanupGate = new Promise<void>(() => undefined);
+    const onCommitted = jest.fn();
+
+    const reset = commitDemoReset(() => coordinator.resetDemoState(), onCommitted);
+    await jest.advanceTimersByTimeAsync(90);
+
+    await expect(reset).resolves.toEqual({ ok: true, committed: true });
+    expect(onCommitted).toHaveBeenCalledTimes(1);
   });
 
   it('coalesces concurrent completion into one backend acceptance', async () => {

@@ -1,11 +1,14 @@
+import * as Crypto from 'expo-crypto';
+
 export const REFERRAL_CODE_PATTERN = /^MAL-[A-HJ-NP-Z2-9]{8}$/;
 export const REFERRAL_DESTINATION = 'onboarding/referral';
 export const REFERRAL_CODE_UNAVAILABLE = 'UNAVAILABLE';
 export const REFERRAL_CODE_INVALID = 'INVALID';
 
 const ATTRIBUTION_KINDS = ['direct', 'deferred', 'demo-direct', 'demo-deferred'] as const;
-const ATTRIBUTION_FINGERPRINT_PATTERN = /^[a-z0-9]{7}$/;
+const ATTRIBUTION_FINGERPRINT_PATTERN = /^(?:fp_[a-f0-9]{32}|[a-z0-9]{7})$/;
 const MAX_CALLBACK_URI_LENGTH = 2_048;
+const MAX_CALLBACK_TIMESTAMP_LENGTH = 20;
 const MAX_PENDING_ATTRIBUTION_AGE_MS = 30 * 24 * 60 * 60 * 1_000;
 const MAX_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 
@@ -85,6 +88,28 @@ function asCallbackUri(value: unknown): string | undefined {
   }
 }
 
+function asCallbackTimestamp(value: unknown): string | undefined {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value) || value < 0 || value > 1e20) return undefined;
+    const canonical = String(value);
+    return canonical.length <= MAX_CALLBACK_TIMESTAMP_LENGTH ? canonical : undefined;
+  }
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed) || trimmed.length > MAX_CALLBACK_TIMESTAMP_LENGTH) {
+    return undefined;
+  }
+  return trimmed.replace(/^0+(?=\d)/, '');
+}
+
+async function createAttributionFingerprint(value: string): Promise<string> {
+  const digest = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    value,
+  );
+  return `fp_${digest.slice(0, 32).toLowerCase()}`;
+}
+
 export function stableHash(value: string): string {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {
@@ -94,10 +119,10 @@ export function stableHash(value: string): string {
   return (hash >>> 0).toString(36).padStart(7, '0');
 }
 
-export function parseReferralAttribution(
+export async function parseReferralAttribution(
   event: RawDeepLinkEvent,
   now: () => Date = () => new Date(),
-): AttributionParseResult {
+): Promise<AttributionParseResult> {
   const params = event.params ?? {};
   const rawCode = params.referral_code ?? params.referralCode;
   const referralCode = referralCodeForTelemetry(rawCode);
@@ -147,7 +172,7 @@ export function parseReferralAttribution(
   const callbackUri = asCallbackUri(event.uri);
   const fingerprintInput = [
     normalizedCode,
-    asString(params['+click_timestamp']) ?? 'no-timestamp',
+    asCallbackTimestamp(params['+click_timestamp']) ?? 'no-timestamp',
     callbackUri ?? 'no-uri',
     kind,
   ].join('|');
@@ -158,7 +183,7 @@ export function parseReferralAttribution(
       referralCode: normalizedCode,
       destination: REFERRAL_DESTINATION,
       kind,
-      fingerprint: stableHash(fingerprintInput),
+      fingerprint: await createAttributionFingerprint(fingerprintInput),
       ...(callbackUri ? { uri: callbackUri } : {}),
       receivedAt: now().toISOString(),
       ...(matchGuaranteed !== undefined ? { matchGuaranteed } : {}),
