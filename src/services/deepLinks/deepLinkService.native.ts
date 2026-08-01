@@ -8,6 +8,7 @@ import type { RawDeepLinkEvent } from '../../domain/referral';
 
 type ReferralControlParams = BranchLinkControlParams & {
   $deeplink_path: string;
+  $ios_nativelink: 'true';
   referral_code: string;
 };
 
@@ -33,6 +34,7 @@ export class BranchDeepLinkService implements DeepLinkService {
     };
     const controlParams: ReferralControlParams = {
       $deeplink_path: 'onboarding/referral',
+      $ios_nativelink: 'true',
       referral_code: referralCode,
     };
 

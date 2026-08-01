@@ -2,6 +2,8 @@ node_modules/
 .expo/
 dist/
 web-build/
+/android/
+/ios/
 .env
 .env.local
 google-services.json
@@ -10,6 +12,9 @@ GoogleService-Info.plist
 *.keystore
 *.p8
 *.p12
+*.cer
+*.mobileprovision
+credentials.json
 coverage/
 .DS_Store
 npm-debug.log*

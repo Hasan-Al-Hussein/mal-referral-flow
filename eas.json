@@ -1,6 +1,7 @@
 {
   "cli": {
-    "version": ">= 18.0.0"
+    "version": "21.4.0",
+    "appVersionSource": "remote"
   },
   "build": {
     "development": {
@@ -31,6 +32,25 @@
       },
       "android": {
         "buildType": "apk",
+        "env": {
+          "NATIVE_BUILD_PLATFORM": "android"
+        }
+      },
+      "ios": {
+        "env": {
+          "NATIVE_BUILD_PLATFORM": "ios"
+        }
+      }
+    },
+    "store-test": {
+      "environment": "preview",
+      "distribution": "store",
+      "autoIncrement": true,
+      "env": {
+        "NATIVE_SDK_BUILD": "1",
+        "BRANCH_ENVIRONMENT": "test"
+      },
+      "android": {
         "env": {
           "NATIVE_BUILD_PLATFORM": "android"
         }

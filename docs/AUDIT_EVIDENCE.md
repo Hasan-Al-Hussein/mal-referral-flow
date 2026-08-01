@@ -1,6 +1,6 @@
 # Backend and reliability audit evidence
 
-This audit traces the assessment from baseline `651293d711668300414ae7e228c28d29646a5096` through the reliability follow-ups. “Deterministic repository proof” means source, automated test, config evaluation, or export evidence that runs without provider credentials. It does not mean native compilation, plugin-mod inspection, signing, provider delivery, physical-device behavior, or store-mediated attribution.
+This audit traces the assessment from baseline `651293d711668300414ae7e228c28d29646a5096` through the reliability follow-ups. “Deterministic repository proof” means source, automated tests, config evaluation, export evidence, disposable generated-native inspection, or fixture-backed Android compilation that runs without provider credentials. It does not mean real SDK network startup, signing/domain association, provider delivery, physical-device behavior, or store-mediated attribution.
 
 ## Independent review resolution matrix
 
@@ -34,13 +34,13 @@ This audit traces the assessment from baseline `651293d711668300414ae7e228c28d29
 
 | Requirement | Evidence | Proof level |
 | --- | --- | --- |
-| Expo React Native choice justified | Pinned Expo/React Native dependencies, custom-development-build rationale, Expo Doctor, web export | Repository/config proof; native compile external |
+| Expo React Native choice justified | Pinned Expo/React Native dependencies, custom-development-build rationale, Expo Doctor, web export, generated Android/iOS structure checks, Android debug compile | Repository/config/compile proof with non-provider fixtures; provider runtime external |
 | Authenticated referrer generates unique shareable link and invokes native share | Auth-required generation, stable per-epoch mock code, HTTPS enforcement for native providers, loopback-only HTTP for the local reviewer build, Branch payload adapter, `Share.share` outcome adapter | Fixture/call-shape proof; global uniqueness and device sheet external |
 | Direct incoming link routes with pre-applied code | Strict Branch-shaped parser, persist-before-route coordinator, warm/cold route tests | Application proof; App/Universal Link association external |
 | Deferred link survives install and first launch | Same accepted callback path, first-session metadata, pending persistence, cold restore, `demo-deferred` web fixture | Post-callback application proof only; store handoff external |
-| Branch rather than Firebase Dynamic Links | Branch native adapter and test/live plugin config; architecture records Dynamic Links shutdown rationale | Source/config proof; provider project external |
+| Branch rather than Firebase Dynamic Links | Branch native adapter, test/live plugin config, packaged runtime JSON, NativeLink parameter, and generated native inspection; architecture records Dynamic Links shutdown rationale | Source/generated-config proof; provider project/runtime external |
 | Exact five events with code and platform | Typed allowlist, schema validator, full-funnel test, immutable outbox identity, accepted presentation snapshot | Repository proof through adapter acceptance |
-| Firebase Analytics real signature | Native adapter calls `logEvent(getAnalytics(), name, properties)` | Mocked call-shape proof; DebugView/warehouse external |
+| Firebase Analytics real signature | Native adapter calls `logEvent(getAnalytics(), name, normalizeFirebaseProperties(event))`; optional booleans become Firebase-compatible `1`/`0` | Mocked call-shape and native-compile proof; DebugView/warehouse external |
 | Mock backend acceptable and failure paths covered | Stable get-or-create, explicit `+fail`, canonical atomic receipt, retries/conflicts/concurrency | Repository proof for mock |
 | Reliability document weighted equally | Architecture covers silent failures, timeouts, retries, duplicate callbacks, idempotency, ordering, privacy, observability, platform behavior, rollout/rollback, and limitations | Document/code reconciliation |
 | Web demo is truthful | `demo-direct`/`demo-deferred` classifications and repeated explicit store-proof boundary | Repository wording + export proof |
@@ -51,16 +51,19 @@ This audit traces the assessment from baseline `651293d711668300414ae7e228c28d29
 | --- | --- |
 | `npm run typecheck` | Passed. |
 | `npm run lint` | Passed with zero warnings. |
-| `npm test -- --runInBand` | Passed: 12 suites, 163 tests. |
-| `npm test -- --runInBand --coverage` | Passed: 90.29% statements, 81.48% branches, 90.61% functions, 93.19% lines. |
+| `npm test -- --runInBand` | Passed: 12 suites, 174 tests. |
+| `npm test -- --runInBand --coverage` | Passed: 90.40% statements, 82.63% branches, 90.82% functions, 93.22% lines. |
 | Web/default `npx expo config --type public --json` | Passed with native providers disabled. |
 | Branch preview/test and production/live probes | Passed: test maps `apiKey`/`testApiKey`/enabled test mode; live omits `testApiKey` and disables test mode; legacy test alias passed; invalid live/test prefix failed as intended. |
 | Platform-specific Firebase config probes | Passed: EAS Android selected JSON only; EAS iOS selected plist only; missing Android worker file failed as intended. |
 | `npx expo-doctor` | Passed: 21/21 checks. |
 | `npm run build:web` | Passed: Expo exported `dist` from 608 modules. |
+| Windows native wrapper negative preflight | Passed: invokes the installed Expo CLI directly and rejects missing Branch/Firebase input before generation. |
+| Clean fixture-backed Android Prebuild + verifier | Passed: generated Branch runtime config, verified both App Link hosts, install-referrer receiver, test-mode key metadata, Firebase package, and Gradle plugin wiring. |
+| GitHub Actions `native-structure` job | Generates and verifies Android/iOS projects, compiles an Android debug APK, and asserts the artifact exists. The exact run is linked from the repository checks. |
 
-Coverage is a gap signal, not a completeness claim. Against the supplied 22-test baseline, aggregate statements increased from 79.86% to 90.29% (+10.43 points), branches from 77.19% to 81.48% (+4.29), and functions from 63.63% to 90.61% (+26.98). The branch percentage reflects substantial reset, migration, accepted-recovery, timeout, share-outcome, and presentation branching; tests prioritize the concrete reviewed behaviors rather than a vanity percentage. Final coverage is: `ReferralCoordinator` 90.41% statements / 94.62% lines; `AnalyticsTracker` 93.93% / 95.40%; `referralStorage` 87.52% / 90.54%; `runReferralShare` 100% / 100%; and `commitDemoReset` 100% statements / 100% lines.
+Coverage is a gap signal, not a completeness claim. Against the supplied 22-test baseline, aggregate statements increased from 79.86% to 90.40% (+10.54 points), branches from 77.19% to 82.63% (+5.44), and functions from 63.63% to 90.82% (+27.19). The branch percentage reflects substantial reset, migration, accepted-recovery, timeout, share-outcome, presentation, and native-configuration branching; tests prioritize the concrete reviewed behaviors rather than a vanity percentage. Final coverage is: `ReferralCoordinator` 90.41% statements / 94.62% lines; `AnalyticsTracker` 93.93% / 95.40%; `referralStorage` 87.52% / 90.54%; `runReferralShare` 100% / 100%; and `commitDemoReset` 100% statements / 100% lines.
 
 ## External proof boundary
 
-No repository test, mocked adapter, web export, or `expo config --type public` output proves config-plugin mods, generated Android/iOS projects, native compilation, SDK binary loading, signing identities, Android `assetlinks.json`, iOS AASA/entitlements, real Branch credentials/dashboard routing, a physical cold/warm callback, a store-mediated app-not-installed → install → first-launch handoff, Firebase DebugView/warehouse ingestion, global referral-code uniqueness, production authentication, authoritative account creation, fraud rules, or transactional rewards. Those checks require Mal-owned projects, signed builds, physical devices, Play internal testing/TestFlight, and a real backend.
+Repository tests and CI now prove config-plugin execution, generated Android/iOS structure, and Android debug compilation with non-networked, package-correct fixtures. They do not prove real SDK network startup, signing identities, Android `assetlinks.json`/Branch domain association, iOS AASA validity, real Branch dashboard routing, a physical cold/warm callback, a store-mediated app-not-installed → install → first-launch handoff, Firebase DebugView/warehouse ingestion, global referral-code uniqueness, production authentication, authoritative account creation, fraud rules, or transactional rewards. Those checks require configured provider projects controlled by the applicant or reviewing organization, matching signed builds/domains, physical devices, Play internal testing/TestFlight, and a real backend.

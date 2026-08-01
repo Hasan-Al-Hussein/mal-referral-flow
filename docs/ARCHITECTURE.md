@@ -5,7 +5,7 @@
 This prototype separates the referral product flow from vendor SDKs so that the same domain logic can run in two environments:
 
 - A reviewer-accessible web build exercises referral generation, sharing, validation, routing, deduplication, failure states, and the complete analytics contract without requiring credentials.
-- Native Expo development/preview profiles are configured to use Branch for direct and deferred deep links and Firebase Analytics for event delivery. Repository tests prove adapter call shapes and config evaluation, not a compiled or provider-backed binary.
+- Native Expo development/preview/store-test profiles use Branch for direct and deferred deep links and Firebase Analytics for event delivery. Disposable CI fixtures prove generated Android/iOS configuration and Android debug compilation; real provider delivery remains a separate authenticated-device check.
 
 The important reliability boundary is explicit: the public web demo proves the UI and application logic, but it cannot prove operating-system Universal Links/App Links or an install-store-first-launch handoff. Those require a signed native build, configured Branch and Firebase projects, and a real Play Store internal-testing or TestFlight install path. This repository contains no real credentials and does not claim that a store-mediated deferred-link test has been completed.
 
@@ -31,7 +31,7 @@ The important reliability boundary is explicit: the public web demo proves the U
 
 ### Expo SDK 56 with development builds
 
-Expo SDK 56 is used for React Native development, typed configuration, and a reproducible web export. Expo gives the prototype fast iteration and an accessible browser artifact while `expo prebuild`/EAS development builds permit native Branch and React Native Firebase modules. This audit ran config evaluation and Expo Doctor, not Prebuild or native compilation.
+Expo SDK 56 is used for React Native development, typed configuration, and a reproducible web export. Expo gives the prototype fast iteration and an accessible browser artifact while `expo prebuild`/EAS development builds permit native Branch and React Native Firebase modules. CI runs disposable Android/iOS Prebuild verification and Android debug compilation with non-provider fixtures; it does not claim SDK network initialization, signing association, or physical-device delivery.
 
 This is deliberately **not** an Expo Go integration. Expo Go has a fixed native binary and cannot load arbitrary native modules such as `react-native-branch` or `@react-native-firebase/analytics`. Native link verification therefore uses a custom development or preview build. The Branch Expo config plugin is community-maintained, so versions are pinned and the generated Android manifest, iOS entitlements, `assetlinks.json`, and AASA configuration must be reviewed during a production release.
 
@@ -57,6 +57,7 @@ try {
     },
     {
       $deeplink_path: 'onboarding/referral',
+      $ios_nativelink: 'true',
       referral_code: code,
     },
   );
@@ -66,7 +67,7 @@ try {
 }
 ```
 
-The implementation releases the native Branch object in `finally`. Mal-controlled Branch domains, store destinations, and web fallbacks are provider-dashboard configuration supplied outside source control.
+The implementation releases the native Branch object in `finally`. A custom Expo plugin packages `branch.json` with `deferInitForPluginRuntime=true` on Android and `Branch.json` with both cold-start deferral and `checkPasteboardOnInstall=true` on iOS. The latter plus `$ios_nativelink=true` enables the NativeLink recovery path when it is also enabled for the controlled Branch app. Branch domains, store destinations, link validation, and web fallbacks remain provider-dashboard configuration outside source control.
 
 References:
 
@@ -76,15 +77,15 @@ References:
 
 ### Firebase Analytics instead of MoEngage
 
-Firebase Analytics is used behind a typed adapter because it provides a small event API, native offline batching, DebugView for verification, and a clear path to BigQuery analysis. The native adapter calls the current modular React Native Firebase signature:
+Firebase Analytics is used behind a typed adapter because it provides a small event API, native offline batching, DebugView for verification, and a clear path to BigQuery analysis. The native adapter calls the current modular signature and converts optional boolean diagnostics to supported numeric `1`/`0` parameters:
 
 ```ts
-await logEvent(getAnalytics(), eventName, parameters);
+await logEvent(getAnalytics(), event.name, normalizeFirebaseProperties(event));
 ```
 
 The web reviewer adapter validates the same event schema and writes events to an inspectable local ledger. It does not pretend to send native Firebase events. On native, Firebase configuration files are supplied locally or through CI and are never committed with secrets.
 
-The native config is platform-aware. Android consumes only `GOOGLE_SERVICES_JSON`; iOS consumes only `GOOGLE_SERVICES_PLIST`. EAS development/preview profiles explicitly select Branch test mode (`testApiKey` plus `enableTestEnvironment: true`); production explicitly selects the live `apiKey` with test mode disabled. Public Branch keys may use the documented split variables or the legacy single-key alias. EAS profiles choose `development`, `preview`, or `production` environments and set `NATIVE_BUILD_PLATFORM` for local config evaluation. On the worker, `EAS_BUILD_PLATFORM` and the matching uploaded Firebase file variable take precedence. Local evaluation uses a conventional gitignored filename because secret EAS file values are worker-only. A successful `expo config --type public` probe demonstrates selection and validation logic only; generated plugin mods, native compilation, signing, and runtime SDK initialization remain external checks.
+The native config is platform-aware. Android consumes only `GOOGLE_SERVICES_JSON`; iOS consumes only `GOOGLE_SERVICES_PLIST`. Files must exist, parse, and match `com.hasanalhussein.malreferral`. Branch domains are normalized hostname-only values; schemes, paths, ports, whitespace, and duplicate primary/alternate hosts fail fast. EAS development/preview/store-test profiles select Branch test mode (`testApiKey` plus `enableTestEnvironment: true`); production selects the live `apiKey` with test mode disabled. Store-test uses store distribution with test attribution and remote auto-incremented versions. Public Branch keys may use the documented split variables or the legacy single-key alias. On the worker, `EAS_BUILD_PLATFORM` and the matching uploaded Firebase file variable take precedence. Local wrappers force provider-native mode and load `.env.local` before config evaluation. CI proves generated mods and Android compilation with non-networked fixtures; signing, SDK network startup, provider delivery, and physical-device behavior remain external checks.
 
 Reference: [React Native Firebase Analytics](https://rnfirebase.io/analytics/usage)
 
@@ -396,13 +397,13 @@ Alert on sharp increases in missing codes, callback failures, invalid-code rate,
 - **Firebase simplicity versus exact delivery:** Firebase provides excellent mobile instrumentation and offline delivery, but it cannot give end-to-end exactly-once guarantees. Stable IDs and downstream/backend reconciliation are required.
 - **Platform share APIs:** a successful share-sheet result is not a recipient delivery receipt, especially on Android.
 - **Privacy-restricted attribution:** deferred matching may be uncertain. Product UX must allow recovery, and business decisions must remain server-authoritative.
-- **Repository proof versus native proof:** Expo config probes validate platform selection and required worker variables, but they do not execute config-plugin mods, compile native code, validate signing/association files, or exercise a physical cold/deferred lifecycle.
+- **Compiled structure versus provider proof:** CI validates config-plugin mods, generated Android/iOS structure, and Android compilation with non-provider fixtures. It cannot validate real signing/domain associations, SDK network startup, provider dashboards, or a physical cold/deferred lifecycle.
 
 ## Production follow-ups
 
 1. Add a referral backend with `get-or-create`, validation, signup acceptance, expiry, anti-abuse rules, and an idempotent reward ledger.
-2. Configure Mal-owned Branch domains, Android App Links, iOS Universal Links, store destinations, and safe web fallbacks.
-3. Configure consent-aware Firebase projects, DebugView verification, BigQuery export, retention, and access controls.
+2. Configure a Branch test/live project controlled by the applicant or reviewing organization, including Android App Links, iOS Universal Links/NativeLink, store destinations, signing identities, and safe web fallbacks.
+3. Configure consent-aware Firebase projects controlled by the applicant or reviewing organization, plus DebugView verification, BigQuery export, retention, and access controls.
 4. Run and record the full native/store matrix on supported OS versions.
 5. Add remote-config rollout controls, operational dashboards, and on-call alerts.
 6. Perform security, privacy, accessibility, and fraud reviews before any monetary incentive is enabled.

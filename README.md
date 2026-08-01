@@ -5,11 +5,11 @@ A production-shaped React Native prototype for generating, sharing, resolving, a
 The project has two deliberately separate execution modes:
 
 - **Credential-free web reviewer build:** exercises the complete referral state machine, validation, routing, persistence, failure handling, and analytics contract without external accounts.
-- **Custom native build configuration:** is prepared to swap in the real Branch React Native SDK, React Native Firebase Analytics, and the operating system share sheet. No native binary or provider-backed device run is claimed in this repository evidence.
+- **Custom native build configuration:** generates the real Branch/React Native Firebase native structure, packages cold-start and NativeLink runtime settings, and compiles an Android debug binary in CI with non-networked test fixtures. No provider-backed device or store run is claimed without real account credentials.
 
 The web build is useful, interactive evidence of application behavior. It is **not** presented as proof of Android App Links, iOS Universal Links, or a store-to-install-to-first-launch handoff. Those claims require the native test matrix documented below.
 
-For the detailed design and reliability analysis, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+For the detailed design and reliability analysis, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). For exact physical-device and store evidence steps, see [docs/NATIVE_PROOF_RUNBOOK.md](docs/NATIVE_PROOF_RUNBOOK.md).
 
 ## Submission links
 
@@ -52,6 +52,8 @@ Useful edge-case checks:
 - [x] Real Branch Universal Object and `generateShortUrl()` call shape in the native adapter
 - [x] Native `Share.share()` integration with shared, cancelled, and failed outcomes
 - [x] Branch subscription for cached initial opens and later direct-link opens
+- [x] Branch cold-start initialization deferral and iOS NativeLink pasteboard configuration packaged by a custom Expo plugin
+- [x] Generated referral links explicitly enable iOS NativeLink
 - [x] Direct and deferred attribution through one strict parser/coordinator path
 - [x] Referral code pre-applied and locked during referred onboarding
 - [x] Pending attribution persisted before analytics or navigation
@@ -62,6 +64,7 @@ Useful edge-case checks:
 - [x] Durable analytics outbox with collision-resistant 128-bit event IDs that remain stable for one retry record
 - [x] Explicit generation, share, deep-link, code, signup, and duplicate diagnostics
 - [x] Firebase Analytics modular API in the native adapter
+- [x] Firebase-compatible native parameter encoding for optional boolean attribution diagnostics
 - [x] Visible credential-free event ledger for reviewer verification
 - [x] Responsive web/native UI with light and dark appearance support
 - [x] Mal-inspired five-stage referral orbit tied to accepted analytics milestones
@@ -74,13 +77,13 @@ Useful edge-case checks:
 - [x] Legacy unscoped-state migration and canonical physical cleanup of malformed local records
 - [x] Retained accepted-outcome recovery from backend receipt through analytics, cleanup, and navigation cuts
 - [x] Persisted, journey-scoped accepted-milestone hydration after a cold restart
-- [x] CI entry point for type checking, linting, tests, and a web export
+- [x] CI entry points for type checking, linting, tests, web export, Android/iOS generated-native inspection, and Android debug compilation
 
 ### External proof/configuration still required
 
 - [x] Publish and smoke-test an anonymous reviewer URL
-- [ ] Configure a real Branch test app, link domains, store fallbacks, and signing identities
-- [ ] Configure Android and iOS Firebase apps and verify events in DebugView
+- [ ] Connect a Branch test app controlled by the applicant/reviewer, including link domains, store fallbacks, and signing identities
+- [ ] Connect Android/iOS Firebase apps controlled by the applicant/reviewer and verify events in DebugView
 - [ ] Validate Android App Links and iOS Universal Links on physical devices
 - [ ] Record a real store-mediated deferred install through Play internal testing/TestFlight
 - [ ] Replace mock identity, referral API, signup, eligibility, and rewards with authoritative backend services
@@ -144,12 +147,13 @@ const { url } = await buo.generateShortUrl(
   },
   {
     $deeplink_path: 'onboarding/referral',
+    $ios_nativelink: 'true',
     referral_code: referralCode,
   },
 );
 ```
 
-At bootstrap, `branch.subscribe({ onOpenComplete })` forwards both the cached initial event and subsequent opens to the coordinator. Navigation never occurs directly inside the SDK callback.
+At bootstrap, `branch.subscribe({ onOpenComplete })` forwards both the cached initial event and subsequent opens to the coordinator. The generated native projects package `deferInitForPluginRuntime` to prevent cold-start subscription races and `checkPasteboardOnInstall` for iOS NativeLink recovery. Navigation never occurs directly inside the SDK callback.
 
 References:
 
@@ -161,10 +165,10 @@ References:
 Firebase Analytics is a focused fit for the required five-event funnel, provides native offline batching and DebugView, and uses a small modular call surface:
 
 ```ts
-await logEvent(getAnalytics(), event.name, event.properties);
+await logEvent(getAnalytics(), event.name, normalizeFirebaseProperties(event));
 ```
 
-The typed `AnalyticsTracker` keeps Firebase out of screens and domain logic. The credential-free web adapter validates the same calls and exposes them in the local ledger but intentionally performs no network analytics. This is a mock delivery boundary, not a claim that the browser sent native Firebase events.
+The typed `AnalyticsTracker` keeps Firebase out of screens and domain logic. The native boundary encodes optional booleans as Firebase-compatible `1`/`0` parameters; required `referral_code` and `platform` remain strings. The credential-free web adapter validates the same semantic events and exposes them in the local ledger but intentionally performs no network analytics. This is a mock delivery boundary, not a claim that the browser sent native Firebase events.
 
 Reference: [React Native Firebase Analytics](https://rnfirebase.io/analytics/usage)
 
@@ -290,9 +294,9 @@ Copy-Item .env.example .env.local
 | `GOOGLE_SERVICES_PLIST` | iOS Firebase build | Local path or EAS file-variable path for iOS config |
 | `EAS_PROJECT_ID` | EAS services | Expo project UUID used by build/update/hosting services |
 
-Native config validates the selected Branch environment and key prefix. Test mode requires a public `key_test_...`, emits `testApiKey`, and explicitly sets `enableTestEnvironment: true`; if no live key is supplied, the test key also fills the plugin's structurally required `apiKey` slot. Live mode requires `key_live_...`, sets `enableTestEnvironment: false`, and never passes `testApiKey`. Firebase validation is platform-specific: Android needs only the JSON file and iOS needs only the plist. A deliberate `all` probe needs both.
+Native config validates the selected Branch environment, key prefix, and hostname-only primary/alternate domains. Test mode requires a public `key_test_...`, emits `testApiKey`, and explicitly sets `enableTestEnvironment: true`; if no live key is supplied, the test key also fills the plugin's structurally required `apiKey` slot. Live mode requires `key_live_...`, sets `enableTestEnvironment: false`, and never passes `testApiKey`. Firebase validation is platform-specific: Android needs only the JSON file and iOS needs only the plist. The referenced file must exist, parse correctly, and register `com.hasanalhussein.malreferral`; a deliberate `all` probe needs both.
 
-Dynamic app config is evaluated in two places. Locally, `EAS_BUILD_PLATFORM` and secret EAS file variables are unavailable, so the committed build profiles set `NATIVE_BUILD_PLATFORM` per platform and config falls back to the conventional ignored files `./google-services.json` or `./GoogleService-Info.plist`. On an EAS worker, `EAS_BUILD_PLATFORM` selects the platform and the matching EAS file variable must resolve to its uploaded temporary path; missing worker credentials fail fast. `expo config --type public` proves only config evaluation. It does not prove config-plugin mods, Prebuild output, native compilation, signing, or SDK startup.
+Dynamic app config is evaluated in two places. Locally, `EAS_BUILD_PLATFORM` and secret EAS file variables are unavailable, so the committed build profiles set `NATIVE_BUILD_PLATFORM` per platform and config falls back to the conventional ignored files `./google-services.json` or `./GoogleService-Info.plist`. On an EAS worker, `EAS_BUILD_PLATFORM` selects the platform and the matching EAS file variable resolves to its uploaded temporary path; missing or mismatched worker credentials fail fast. Repository CI additionally performs disposable Android/iOS Prebuild inspection and compiles an Android debug binary with package-correct, non-provider test fixtures. Signing, SDK network startup, provider delivery, and physical-device behavior remain separate checks.
 
 This follows Expo's documented [EAS environment-variable model](https://docs.expo.dev/eas/environment-variables/), including worker-provided file paths and explicit build-profile environments.
 
@@ -317,40 +321,41 @@ Branch SDK keys are public identifiers embedded in the app. Never put a Branch s
 After adding or changing native dependencies/configuration, regenerate native projects cleanly:
 
 ```bash
-npx expo prebuild --clean
-npx expo run:android
+npm run native:prebuild:android
+npm run native:verify:android
+npm run android
 ```
 
-On macOS with Xcode, use `npx expo run:ios`. Windows cannot compile an iOS binary locally.
+On macOS with Xcode, use `npm run native:prebuild:ios`, `npm run native:verify:ios`, and `npm run ios`. These wrappers force provider-native mode and run config validation before generation or compilation. Windows cannot compile an iOS binary locally.
 
 ### 4. Build a shareable Android APK with EAS
 
-The committed `development` and `preview` profiles set `BRANCH_ENVIRONMENT=test`; `production` explicitly selects `live`. Preview also sets `NATIVE_SDK_BUILD=1`, uses internal distribution, and produces an APK.
+The committed `development`, `preview`, and `store-test` profiles set `BRANCH_ENVIRONMENT=test`; `production` explicitly selects `live`. Preview uses internal distribution and produces an APK. Store-test reuses the EAS `preview` credentials but produces store artifacts with test attribution and remote auto-incremented versions.
 
 ```bash
-npx eas-cli@latest login
-npx eas-cli@latest init
+npx eas-cli@21.4.0 login
+npx eas-cli@21.4.0 init
 ```
 
 The committed profile selects the EAS `preview` environment. Store the public Branch values and the Android Firebase file there:
 
 ```powershell
-npx eas-cli@latest env:set preview --name EXPO_PUBLIC_BRANCH_TEST_KEY --value key_test_REPLACE_ME --type string --visibility plaintext
-npx eas-cli@latest env:set preview --name EXPO_PUBLIC_BRANCH_DOMAIN --value your-app.test-app.link --type string --visibility plaintext
-npx eas-cli@latest env:set preview --name EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN --value your-app-alternate.test-app.link --type string --visibility plaintext
-npx eas-cli@latest env:set preview --name GOOGLE_SERVICES_JSON --value .\google-services.json --type file --visibility secret
-npx eas-cli@latest env:set preview --name EAS_PROJECT_ID --value YOUR_EXPO_PROJECT_UUID --type string --visibility plaintext
+npx eas-cli@21.4.0 env:set preview --name EXPO_PUBLIC_BRANCH_TEST_KEY --value key_test_REPLACE_ME --type string --visibility plaintext
+npx eas-cli@21.4.0 env:set preview --name EXPO_PUBLIC_BRANCH_DOMAIN --value your-app.test-app.link --type string --visibility plaintext
+npx eas-cli@21.4.0 env:set preview --name EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN --value your-app-alternate.test-app.link --type string --visibility plaintext
+npx eas-cli@21.4.0 env:set preview --name GOOGLE_SERVICES_JSON --value .\google-services.json --type file --visibility secret
+npx eas-cli@21.4.0 env:set preview --name EAS_PROJECT_ID --value YOUR_EXPO_PROJECT_UUID --type string --visibility plaintext
 ```
 
-For production, configure `EXPO_PUBLIC_BRANCH_LIVE_KEY=key_live_...` in the EAS `production` environment. For an iOS build, upload `GOOGLE_SERVICES_PLIST` to the selected environment instead. EAS injects a temporary worker path into the environment variable; do not expect a secret file variable to be readable during a local `expo config` command. The local ignored-file fallback exists for that evaluation path. The `development`, `preview`, and `production` profiles explicitly select their same-named EAS environments.
+For production, configure `EXPO_PUBLIC_BRANCH_LIVE_KEY=key_live_...` in the EAS `production` environment. For an iOS build, upload `GOOGLE_SERVICES_PLIST` to the selected environment instead. EAS injects a temporary worker path into the environment variable; do not expect a secret file variable to be readable during a local `expo config` command. The local ignored-file fallback exists for that evaluation path. Development, preview, and production select their same-named environments; store-test intentionally selects `preview` so test keys are used in Play internal testing/TestFlight.
 
 Build:
 
 ```bash
-npx eas-cli@latest build --platform android --profile preview
+npx eas-cli@21.4.0 build --platform android --profile preview
 ```
 
-Keep unauthenticated access to internal builds enabled, test the resulting URL in incognito, and add the final APK URL to the submission table. Obtain the EAS signing-certificate SHA-256 with `npx eas-cli@latest credentials --platform android` plus `keytool`, then add it to Branch before claiming verified App Links.
+Keep unauthenticated access to internal builds enabled, test the resulting URL in incognito, and add the final APK URL to the submission table. Obtain the EAS signing-certificate SHA-256 with `npx eas-cli@21.4.0 credentials --platform android` plus `keytool`, then add it to Branch before claiming verified App Links. For the app-absent → store → first-launch proof, build `--profile store-test` and follow [the native proof runbook](docs/NATIVE_PROOF_RUNBOOK.md).
 
 ## Direct and deferred test matrix
 
@@ -384,8 +389,8 @@ Every required success event carries the same typed context:
 | `app_version` | string | Separates behavior by shipped app version |
 | `occurred_at_utc` | ISO-8601 string | Client-side occurrence timestamp in UTC |
 | `attribution_kind` | optional string | `direct`, `deferred`, `demo-direct`, or `demo-deferred` |
-| `is_first_session` | optional boolean | Mirrors deferred first-session context |
-| `match_guaranteed` | optional boolean | Preserves Branch match certainty for platform-aware analysis; never authorizes rewards |
+| `is_first_session` | optional boolean (`1`/`0` in Firebase transport) | Mirrors deferred first-session context |
+| `match_guaranteed` | optional boolean (`1`/`0` in Firebase transport) | Preserves Branch match certainty for platform-aware analysis; never authorizes rewards |
 | `share_channel` | optional string | Native share, Web Share, or clipboard fallback |
 | `reason` | optional string | Allowlisted bounded diagnostic reason; never form data or credentials |
 
@@ -434,7 +439,7 @@ npm test
 npm run build:web
 ```
 
-GitHub Actions runs the same checks on pushes to `main` and on pull requests. Native verification remains separate because it requires provider credentials, signing identities, physical devices, and store/install state.
+GitHub Actions runs those checks plus clean Android/iOS Prebuild inspection and an Android debug compilation on pushes to `main` and on pull requests. Provider-runtime and store-install verification remain separate because they require configured accounts, signing identities, physical devices, and store/install state.
 
 The rendered reviewer build was checked at 375 x 812, 768 x 1024, 812 x 375, 1440 x 1000, and a 720px CSS viewport as a 1440-at-200%-zoom reflow proxy, in light and dark themes. The combined Generate → Share → Deferred path was verified at `3/5` on onboarding and `5/5` on completion. A standalone deferred fixture was separately verified at `1/5 · Click`; signup start and completion advance that invitee-side trace to `3/5 · Verified`. **Run the flow again** was regression-checked to restore a new Invite route at `0/5` without the previous referral code. Reset creates a fresh demo storage epoch, including a newly generated local code. The reduced-motion branches were source-verified for immediate state values and disabled navigation animation; final OS/browser-setting emulation remains a manual device check.
 

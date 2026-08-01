@@ -60,6 +60,7 @@ describe('native Branch adapter', () => {
       },
       {
         $deeplink_path: 'onboarding/referral',
+        $ios_nativelink: 'true',
         referral_code: 'MAL-ABCD2345',
       },
     );
@@ -147,6 +148,8 @@ describe('native Firebase adapter', () => {
         occurred_at_utc: '2026-07-31T12:00:00.000Z',
         schema_version: 1,
         app_version: '1.0.0',
+        is_first_session: true,
+        match_guaranteed: false,
       },
     };
 
@@ -156,7 +159,11 @@ describe('native Firebase adapter', () => {
     expect(mockLogEvent).toHaveBeenCalledWith(
       { app: 'analytics-test-double' },
       event.name,
-      event.properties,
+      {
+        ...event.properties,
+        is_first_session: 1,
+        match_guaranteed: 0,
+      },
     );
   });
 });
