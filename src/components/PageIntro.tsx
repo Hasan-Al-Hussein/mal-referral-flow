@@ -1,6 +1,8 @@
-import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Animated, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 
 import { AnimatedReveal } from '../motion/AnimatedReveal';
+import { useReducedMotion } from '../motion/MotionProvider';
 import { motion, typography, useAppTheme } from '../theme/theme';
 
 interface PageIntroProps {
@@ -12,12 +14,53 @@ interface PageIntroProps {
 export function PageIntro({ eyebrow, title, description }: PageIntroProps): React.JSX.Element {
   const { colors } = useAppTheme();
   const { width } = useWindowDimensions();
+  const reducedMotion = useReducedMotion();
+  const [engagement] = useState(() => new Animated.Value(0));
   const compact = width < 520;
+
+  useEffect(
+    () => () => {
+      engagement.stopAnimation();
+    },
+    [engagement],
+  );
+
+  const setEngaged = (engaged: boolean) => {
+    engagement.stopAnimation();
+    if (reducedMotion) {
+      engagement.setValue(0);
+      return;
+    }
+    Animated.timing(engagement, {
+      toValue: engaged ? 1 : 0,
+      duration: engaged ? motion.hoverIn : motion.hoverOut,
+      easing: motion.easeOut,
+      useNativeDriver: motion.nativeDriver,
+    }).start();
+  };
+
   return (
-    <View style={styles.container}>
+    <View
+      accessibilityLiveRegion="polite"
+      onPointerEnter={() => setEngaged(true)}
+      onPointerLeave={() => setEngaged(false)}
+      style={styles.container}
+    >
       <AnimatedReveal duration={motion.feedback}>
         <View style={styles.eyebrowRow}>
-          <View style={[styles.eyebrowDash, { backgroundColor: colors.accent }]} />
+          <Animated.View
+            style={[
+              styles.eyebrowDash,
+              {
+                backgroundColor: colors.accent,
+                transform: [
+                  {
+                    scaleX: engagement.interpolate({ inputRange: [0, 1], outputRange: [1, 1.65] }),
+                  },
+                ],
+              },
+            ]}
+          />
           <Text style={[styles.eyebrow, { color: colors.accentStrong }]}>{eyebrow}</Text>
         </View>
       </AnimatedReveal>
@@ -58,7 +101,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: -1.65,
   },
-  titleCompact: { fontSize: 36, lineHeight: 41, letterSpacing: -1.15 },
+  titleCompact: { fontSize: 34, lineHeight: 39, letterSpacing: -1.05 },
   description: {
     maxWidth: 680,
     fontFamily: typography.family,

@@ -97,8 +97,7 @@ export function Button({
       disabled={inactive}
       focusColor={colors.accent}
       frameStyle={[styles.motionFrame, fullWidth && styles.fullWidth, style]}
-      glowColor={isPrimary ? colors.accent : undefined}
-      hoverTint={isDanger ? colors.danger : isPrimary ? colors.white : colors.accent}
+      hoverTint={isDanger ? colors.danger : isPrimary ? undefined : colors.accent}
       onPress={onPress}
       onPressIn={triggerPressResponse}
       preset="button"
@@ -181,11 +180,6 @@ export function Button({
             <Animated.View
               style={{
                 transform: [
-                  {
-                    scale: reducedMotion
-                      ? 1
-                          : engagement.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }),
-                  },
                   {
                     translateX: reducedMotion
                       ? 0

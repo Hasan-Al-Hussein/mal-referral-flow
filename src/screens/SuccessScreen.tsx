@@ -12,6 +12,7 @@ import { ReferralOrbit } from '../components/ReferralOrbit';
 import { ScreenShell } from '../components/ScreenShell';
 import { StatusBanner } from '../components/StatusBanner';
 import { AnimatedReveal } from '../motion/AnimatedReveal';
+import { MotionSurface } from '../motion/MotionSurface';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 import type { RootStackParamList } from '../navigation/types';
@@ -61,16 +62,22 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
         <View style={[styles.columns, !isWide && styles.stacked]}>
           <View style={styles.mainColumn}>
             <AnimatedReveal variant="scale">
-              <LinearGradient
-                colors={
-                  isDark
-                    ? ['#241A35', '#171827', '#142A32']
-                    : ['#F8EEFF', '#E9EEFF', '#E4F6F4']
-                }
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.successCard, { borderColor: colors.border }]}
+              <MotionSurface
+                accentColor={colors.success}
+                borderRadius={radii.xl}
+                intensity="hero"
+                testID="success-celebration-surface"
               >
+                <LinearGradient
+                  colors={
+                    isDark
+                      ? ['#241A35', '#171827', '#142A32']
+                      : ['#F8EEFF', '#E9EEFF', '#E4F6F4']
+                  }
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={[styles.successCard, { borderColor: colors.border }]}
+                >
                 <ReferralOrbit
                   activeMilestones={activeMilestones}
                   size={compact ? 200 : 238}
@@ -83,7 +90,7 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
                   </View>
                 </AnimatedReveal>
                 <AnimatedReveal delay={motion.stagger * 2}>
-                  <Text accessibilityRole="header" style={[styles.title, compact && styles.titleCompact, { color: colors.ink }]}>The referred signup is complete.</Text>
+                  <Text accessibilityLiveRegion="polite" accessibilityRole="header" style={[styles.title, compact && styles.titleCompact, { color: colors.ink }]}>The referred signup is complete.</Text>
                 </AnimatedReveal>
                 <AnimatedReveal delay={motion.stagger * 3}>
                   <Text style={[styles.description, { color: colors.inkMuted }]}>The invitee-side journey completed with the same protected referral identity that arrived on the original link.</Text>
@@ -121,7 +128,8 @@ export function SuccessScreen({ route, navigation }: Props): React.JSX.Element {
                   </View>
                 ) : null}
                 <Button label="Run the flow again" icon="refresh-cw" loading={isResetting} fullWidth onPress={() => void restart()} />
-              </LinearGradient>
+                </LinearGradient>
+              </MotionSurface>
             </AnimatedReveal>
 
             {!isWide ? (

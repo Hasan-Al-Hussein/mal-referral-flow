@@ -29,7 +29,7 @@ Primary CTA gradient: `#5222C8 → #2858B9` in light mode and `#633ED6 → #2854
 ## Typography
 
 - Geometric system sans stack matching the Mal wordmark's clean character.
-- Display: 36/41 mobile, 46/51 desktop, weight 800.
+- Display: 34/39 mobile, 46/51 desktop, weight 800.
 - Card title: 25–29px, weight 800.
 - Body: 15–16px with 1.5–1.6 line height.
 - Labels: 10–11px only when uppercase and supplemental; never for body instructions.
@@ -62,7 +62,8 @@ The orbit center uses a solid semantic pair rather than a multicolor text backdr
 - State transitions: READY, accordion expansion, signup progress, validation, and local-trace counters animate only when their underlying state changes.
 - Success/orbit sequence: finite, state-driven, transform/opacity only.
 - Easing: `Bezier(0.16, 1, 0.3, 1)`.
-- Static hero, arrival, link, trace, form, and receipt surfaces never lift on hover because they are not actions.
+- One signature journey surface per route may use a restrained 4px ambient depth response; it never changes cursor, enters the tab order, or gains press semantics.
+- Quiet informational surfaces never move. They may reveal only a 2.5–3.5% clipped rim/sheen so pointer response does not imply an action.
 - No looping decoration, confetti, pointer-following parallax, or animation-triggered business logic.
 - Reduced motion: content appears immediately and navigation animation is disabled.
 

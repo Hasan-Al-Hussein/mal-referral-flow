@@ -24,6 +24,7 @@ import { StatusBanner } from '../components/StatusBanner';
 import { AnimatedReveal } from '../motion/AnimatedReveal';
 import { MotionFieldFrame } from '../motion/MotionFieldFrame';
 import { useReducedMotion } from '../motion/MotionProvider';
+import { MotionSurface } from '../motion/MotionSurface';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 import type { RootStackParamList } from '../navigation/types';
@@ -42,6 +43,7 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
   const { width } = useWindowDimensions();
   const isWide = width >= 1200;
   const arrivalWide = width >= 650;
+  const compact = width < 520;
   const { coordinator, events } = useReferralRuntime();
   const isReviewerFixture = attribution.kind.startsWith('demo-');
   const isSimulatedDeferred = attribution.kind === 'demo-deferred';
@@ -145,7 +147,7 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
   return (
     <ScreenShell>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-        <View style={styles.page}>
+        <View style={[styles.page, compact && styles.pageCompact]}>
           <Button
             label="Back to referral lab"
             icon="arrow-left"
@@ -163,17 +165,28 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
           <View style={[styles.columns, !isWide && styles.stacked]}>
             <View style={styles.mainColumn}>
               <AnimatedReveal delay={motion.stagger * 2} distance={18} variant="forward">
-                <LinearGradient
-                  colors={
-                    isDark
-                      ? ['#251B36', '#182032', '#16303A']
-                      : ['#F7EDFF', '#E9EEFF', '#E6F8F7']
-                  }
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={[styles.arrivalCard, !arrivalWide && styles.arrivalStacked, { borderColor: colors.border }]}
+                <MotionSurface
+                  accentColor={colors.accent}
+                  borderRadius={radii.xl}
+                  intensity="hero"
+                  testID="onboarding-attribution-surface"
                 >
-                  <View style={styles.arrivalCopy}>
+                  <LinearGradient
+                    colors={
+                      isDark
+                        ? ['#251B36', '#182032', '#16303A']
+                        : ['#F7EDFF', '#E9EEFF', '#E6F8F7']
+                    }
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={[
+                      styles.arrivalCard,
+                      !arrivalWide && styles.arrivalStacked,
+                      compact && styles.arrivalCardCompact,
+                      { borderColor: colors.border },
+                    ]}
+                  >
+                  <View style={[styles.arrivalCopy, compact && styles.arrivalCopyCompact]}>
                     <View style={styles.arrivalBadgeRow}>
                       <View style={[styles.arrivalIcon, { backgroundColor: colors.surfaceGlass }]}>
                         <Feather name="check" color={colors.success} size={18} />
@@ -199,10 +212,16 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                     ) : null}
                     <Text style={[styles.arrivalTitle, { color: colors.ink }]}>
                       {isReviewerFixture
-                        ? 'The simulated callback was accepted.'
+                        ? compact
+                          ? 'Callback accepted.'
+                          : 'The simulated callback was accepted.'
                         : 'The link survived the handoff.'}
                     </Text>
-                    <Text style={[styles.arrivalDescription, { color: colors.inkMuted }]}>The code is persisted before navigation and becomes immutable when signup starts.</Text>
+                    <Text style={[styles.arrivalDescription, { color: colors.inkMuted }]}>
+                      {compact
+                        ? 'The code is persisted and locked for signup.'
+                        : 'The code is persisted before navigation and becomes immutable when signup starts.'}
+                    </Text>
                     {isSimulatedDeferred ? (
                       <View
                         style={[
@@ -212,7 +231,9 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                       >
                         <Feather name="repeat" color={colors.accentStrong} size={16} />
                         <Text style={[styles.deviceHandoffText, { color: colors.inkMuted }]}>
-                          {simulatedHandoffCopy}
+                          {compact && includesReferrerMilestones
+                            ? 'Create, share, and click are preserved — onboarding starts at 3/5.'
+                            : simulatedHandoffCopy}
                         </Text>
                       </View>
                     ) : null}
@@ -225,6 +246,22 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                         <Feather name="lock" color={colors.success} size={17} />
                       </View>
                     </View>
+                    {!arrivalWide && !hasStarted ? (
+                      <View style={[styles.mobileStart, { borderTopColor: colors.border }]}>
+                        <View style={styles.mobileStartCopy}>
+                          <Feather name="shield" color={colors.success} size={16} />
+                          <Text style={[styles.mobileStartText, { color: colors.inkMuted }]}>Validated, persisted, and ready for secure signup.</Text>
+                        </View>
+                        {serverError ? <StatusBanner tone="error" title="Signup could not start" message={serverError} /> : null}
+                        <Button
+                          label="Start secure signup"
+                          icon="arrow-right"
+                          loading={isStarting}
+                          fullWidth
+                          onPress={() => void begin()}
+                        />
+                      </View>
+                    ) : null}
                   </View>
                   <View style={styles.arrivalOrbit}>
                     <ReferralOrbit
@@ -233,11 +270,19 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                       status={formHasError ? 'attention' : 'default'}
                     />
                   </View>
-                </LinearGradient>
+                  </LinearGradient>
+                </MotionSurface>
               </AnimatedReveal>
 
-              <AnimatedReveal delay={motion.stagger * 3} distance={18} variant="forward">
-                <View style={[styles.formCard, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
+              {hasStarted || arrivalWide ? (
+                <AnimatedReveal delay={motion.stagger * 3} distance={18} variant="forward">
+                <MotionSurface
+                  accentColor={formHasError ? colors.danger : colors.accent}
+                  borderRadius={radii.xl}
+                  intensity="standard"
+                  testID="onboarding-form-surface"
+                >
+                  <View style={[styles.formCard, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
                   <StepHeader step={hasStarted ? 2 : 1} />
 
                   {!hasStarted ? (
@@ -375,8 +420,10 @@ export function OnboardingScreen({ route, navigation }: Props): React.JSX.Elemen
                       </View>
                     </AnimatedReveal>
                   )}
-                </View>
-              </AnimatedReveal>
+                  </View>
+                </MotionSurface>
+                </AnimatedReveal>
+              ) : null}
 
               {!isWide ? (
                 <View style={styles.mobileTrace}>
@@ -491,6 +538,7 @@ function TrustRow({ icon, label }: { icon: keyof typeof Feather.glyphMap; label:
 
 const styles = StyleSheet.create({
   page: { paddingTop: 24, gap: 30 },
+  pageCompact: { paddingTop: 18, gap: 22 },
   backButton: { alignSelf: 'flex-start' },
   columns: { flexDirection: 'row', alignItems: 'flex-start', gap: 28 },
   stacked: { flexDirection: 'column' },
@@ -498,7 +546,9 @@ const styles = StyleSheet.create({
   sideColumn: { flex: 0.88, minWidth: 300, width: '100%' },
   arrivalCard: { borderWidth: 1, borderRadius: radii.xl, padding: 25, flexDirection: 'row', alignItems: 'center', gap: 20, overflow: 'hidden' },
   arrivalStacked: { flexDirection: 'column', alignItems: 'stretch' },
+  arrivalCardCompact: { padding: 18, gap: 16 },
   arrivalCopy: { flex: 1, minWidth: 0, gap: 14 },
+  arrivalCopyCompact: { gap: 11 },
   arrivalBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
   arrivalBadgeCopy: { flex: 1, minWidth: 0 },
   arrivalIcon: { width: 40, height: 40, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
@@ -545,6 +595,9 @@ const styles = StyleSheet.create({
   codeLabel: { fontFamily: typography.family, fontSize: 10, lineHeight: 14, fontWeight: '800', letterSpacing: 1 },
   code: { marginTop: 4, flexShrink: 1, fontFamily: typography.mono, fontSize: 22, lineHeight: 29, fontWeight: '700', letterSpacing: 1 },
   lockIcon: { width: 38, height: 38, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  mobileStart: { borderTopWidth: 1, paddingTop: 14, gap: 12 },
+  mobileStartCopy: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  mobileStartText: { flex: 1, fontFamily: typography.family, fontSize: 12, lineHeight: 18, fontWeight: '600' },
   arrivalOrbit: { alignItems: 'center', justifyContent: 'center' },
   formCard: { borderWidth: 1, borderRadius: radii.xl, padding: 26, gap: 20, shadowColor: '#2B1C4C', shadowOpacity: 0.06, shadowRadius: 18, shadowOffset: { width: 0, height: 10 }, elevation: 3 },
   formStage: { gap: 20 },

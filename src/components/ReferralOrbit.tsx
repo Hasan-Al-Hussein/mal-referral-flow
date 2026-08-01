@@ -58,6 +58,8 @@ export function ReferralOrbit({
     ),
   );
   const [entry] = useState(() => new Animated.Value(reducedMotion ? 1 : 0));
+  const [hover] = useState(() => new Animated.Value(0));
+  const [celebration] = useState(() => new Animated.Value(success && reducedMotion ? 1 : 0));
   const nodeSize = Math.max(28, size * 0.112);
   const carrierSize = nodeSize + 8;
   const orbitRadius = size * 0.38;
@@ -158,6 +160,45 @@ export function ReferralOrbit({
     return () => animation.stop();
   }, [entry, reducedMotion, status]);
 
+  useEffect(() => {
+    celebration.stopAnimation();
+    if (!success || reducedMotion) {
+      celebration.setValue(success ? 1 : 0);
+      return;
+    }
+    celebration.setValue(0);
+    const animation = Animated.timing(celebration, {
+      toValue: 1,
+      duration: motion.celebration,
+      easing: motion.easeOut,
+      useNativeDriver: motion.nativeDriver,
+    });
+    animation.start();
+    return () => animation.stop();
+  }, [celebration, reducedMotion, success]);
+
+  useEffect(
+    () => () => {
+      hover.stopAnimation();
+      celebration.stopAnimation();
+    },
+    [celebration, hover],
+  );
+
+  const setHovered = (engaged: boolean) => {
+    hover.stopAnimation();
+    if (reducedMotion) {
+      hover.setValue(0);
+      return;
+    }
+    Animated.timing(hover, {
+      toValue: engaged ? 1 : 0,
+      duration: engaged ? motion.hoverIn : motion.hoverOut,
+      easing: motion.easeOut,
+      useNativeDriver: motion.nativeDriver,
+    }).start();
+  };
+
   const hasAttention = status === 'attention' || status === 'rejected';
   const stateLabel = status === 'rejected'
     ? 'Rejected'
@@ -171,6 +212,8 @@ export function ReferralOrbit({
   const coreForeground = isDark ? colors.background : colors.white;
   const coreStateLabel = status === 'attention' ? 'DETAILS' : stateLabel.toUpperCase();
   const entryScale = entry.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1] });
+  const hoverScale = hover.interpolate({ inputRange: [0, 1], outputRange: [1, 1.01] });
+  const hoverHaloScale = hover.interpolate({ inputRange: [0, 1], outputRange: [1, 1.045] });
   const haloScale = progress.interpolate({
     inputRange: [0, STEP_COUNT],
     outputRange: [0.82, success ? 1.12 : 1],
@@ -192,9 +235,79 @@ export function ReferralOrbit({
     <Animated.View
       accessibilityRole="image"
       accessibilityLabel={`Referral journey: ${completedCount} of ${STEP_COUNT} milestones complete. Current state: ${stateLabel}.`}
-      style={[styles.container, { width: size, opacity: entry, transform: [{ scale: entryScale }] }]}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      style={[
+        styles.container,
+        {
+          width: size,
+          opacity: entry,
+          transform: [
+            {
+              translateY: hover.interpolate({ inputRange: [0, 1], outputRange: [0, -1.5] }),
+            },
+            { scale: Animated.multiply(entryScale, hoverScale) },
+          ],
+        },
+      ]}
     >
       <View style={{ width: size, height: size }}>
+        {success && !reducedMotion ? (
+          <>
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.celebrationRing,
+                {
+                  width: size * 0.48,
+                  height: size * 0.48,
+                  borderRadius: size * 0.24,
+                  left: size * 0.26,
+                  top: size * 0.26,
+                  borderColor: colors.success,
+                  opacity: celebration.interpolate({
+                    inputRange: [0, 0.16, 1],
+                    outputRange: [0, 0.34, 0],
+                  }),
+                  transform: [
+                    {
+                      scale: celebration.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.72, 1.72],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            />
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.celebrationRing,
+                {
+                  width: size * 0.48,
+                  height: size * 0.48,
+                  borderRadius: size * 0.24,
+                  left: size * 0.26,
+                  top: size * 0.26,
+                  borderColor: colors.accent,
+                  opacity: celebration.interpolate({
+                    inputRange: [0, 0.3, 1],
+                    outputRange: [0, 0.24, 0],
+                  }),
+                  transform: [
+                    {
+                      scale: celebration.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0.62, 1.42],
+                      }),
+                    },
+                  ],
+                },
+              ]}
+            />
+          </>
+        ) : null}
         <Animated.View
           style={[
             styles.halo,
@@ -206,11 +319,11 @@ export function ReferralOrbit({
               top: size * 0.215,
               backgroundColor: hasAttention ? colors.danger : colors.brandLilac,
               opacity: hasAttention ? 0.16 : 0.2,
-              transform: [{ scale: haloScale }],
+              transform: [{ scale: Animated.multiply(haloScale, hoverHaloScale) }],
             },
           ]}
         />
-        <View
+        <Animated.View
           style={[
             styles.orbit,
             {
@@ -220,6 +333,11 @@ export function ReferralOrbit({
               height: size * 0.84,
               borderRadius: size * 0.42,
               borderColor: colors.borderStrong,
+              transform: [
+                {
+                  rotate: hover.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '5deg'] }),
+                },
+              ],
             },
           ]}
         />
@@ -255,7 +373,7 @@ export function ReferralOrbit({
           );
         })}
 
-        <View
+        <Animated.View
           style={[
             styles.coreFrame,
             {
@@ -266,6 +384,11 @@ export function ReferralOrbit({
               top: size * 0.3,
               backgroundColor: stateSoft,
               borderColor: stateColor,
+              transform: [
+                {
+                  scale: hover.interpolate({ inputRange: [0, 1], outputRange: [1, 1.018] }),
+                },
+              ],
             },
           ]}
         >
@@ -292,13 +415,13 @@ export function ReferralOrbit({
               {coreStateLabel}
             </Text>
           </View>
-        </View>
+        </Animated.View>
 
         {nodes.map((node, index) => {
           const stage = JOURNEY_STAGES[index]!;
           const stageProgress = nodeProgress[index]!;
           return (
-            <View
+            <Animated.View
               key={stage.label}
               style={[
                 styles.node,
@@ -310,6 +433,14 @@ export function ReferralOrbit({
                   top: node.top,
                   backgroundColor: colors.surfaceElevated,
                   borderColor: colors.borderStrong,
+                  transform: [
+                    {
+                      scale: Animated.multiply(
+                        hover.interpolate({ inputRange: [0, 1], outputRange: [1, 1.025] }),
+                        stageProgress.interpolate({ inputRange: [0, 1], outputRange: [1, 1.04] }),
+                      ),
+                    },
+                  ],
                 },
               ]}
             >
@@ -335,7 +466,7 @@ export function ReferralOrbit({
               >
                 <Feather name={stage.icon} color={colors.white} size={nodeSize * 0.43} />
               </Animated.View>
-            </View>
+            </Animated.View>
           );
         })}
 
@@ -357,6 +488,9 @@ export function ReferralOrbit({
               transform: [
                 { translateX: Animated.subtract(carrierX, center) },
                 { translateY: Animated.subtract(carrierY, center) },
+                {
+                  scale: hover.interpolate({ inputRange: [0, 1], outputRange: [1, 1.08] }),
+                },
               ],
             },
           ]}
@@ -404,6 +538,7 @@ export function ReferralOrbit({
 
 const styles = StyleSheet.create({
   container: { alignItems: 'center' },
+  celebrationRing: { position: 'absolute', borderWidth: 2 },
   halo: { position: 'absolute' },
   orbit: { position: 'absolute', borderWidth: 1 },
   segmentBase: { position: 'absolute', height: 3, borderRadius: 2, overflow: 'hidden' },

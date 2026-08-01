@@ -14,6 +14,7 @@ import {
 } from '../domain/analytics';
 import { AnimatedReveal } from '../motion/AnimatedReveal';
 import { useReducedMotion } from '../motion/MotionProvider';
+import { MotionSurface } from '../motion/MotionSurface';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 const shortLabels: Record<ReferralEventName, string> = {
@@ -87,7 +88,13 @@ export function EventLedger({ referralCode, referralFingerprint }: EventLedgerPr
   }, [completedCount, counterScale, reducedMotion]);
 
   return (
-    <View style={[styles.card, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
+    <MotionSurface
+      accentColor={colors.accent}
+      borderRadius={radii.lg}
+      intensity="standard"
+      testID="event-ledger-surface"
+    >
+      <View style={[styles.card, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
       <View style={styles.headingRow}>
         <View style={styles.headingCopy}>
           <View style={styles.liveRow}>
@@ -199,7 +206,8 @@ export function EventLedger({ referralCode, referralFingerprint }: EventLedgerPr
           </View>
         </View>
       )}
-    </View>
+      </View>
+    </MotionSurface>
   );
 }
 

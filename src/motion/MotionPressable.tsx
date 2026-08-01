@@ -38,9 +38,9 @@ const presetValues: Record<
   MotionPreset,
   { hoverX: number; hoverY: number; pressScale: number; rotation: number }
 > = {
-  button: { hoverX: 0, hoverY: -1.5, pressScale: 0.975, rotation: 0 },
-  icon: { hoverX: 0, hoverY: -1, pressScale: 0.94, rotation: 0 },
-  row: { hoverX: 2, hoverY: 0, pressScale: 0.995, rotation: 0 },
+  button: { hoverX: 0, hoverY: -2.5, pressScale: 0.97, rotation: 0 },
+  icon: { hoverX: 0, hoverY: -2, pressScale: 0.92, rotation: 5 },
+  row: { hoverX: 4, hoverY: 0, pressScale: 0.99, rotation: 0 },
 };
 
 export function MotionPressable({
@@ -156,8 +156,13 @@ export function MotionPressable({
             {
               backgroundColor: glowColor,
               borderRadius,
-              opacity: engagement.interpolate({ inputRange: [0, 1], outputRange: [0, 0.1] }),
+              opacity: engagement.interpolate({ inputRange: [0, 1], outputRange: [0, 0.16] }),
               shadowColor: glowColor,
+              transform: [
+                {
+                  scale: engagement.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1.025] }),
+                },
+              ],
             },
           ]}
         />
@@ -211,7 +216,7 @@ export function MotionPressable({
                     backgroundColor: hoverTint,
                     opacity: engagement.interpolate({
                       inputRange: [0, 1],
-                      outputRange: [0, 0.08],
+                      outputRange: [0, 0.1],
                     }),
                   },
                 ]}

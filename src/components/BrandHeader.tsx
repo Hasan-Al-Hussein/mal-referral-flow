@@ -4,6 +4,7 @@ import { Animated, Image, Platform, StyleSheet, Text, useWindowDimensions, View 
 
 import { MotionPressable } from '../motion/MotionPressable';
 import { useReducedMotion } from '../motion/MotionProvider';
+import { MotionSurface } from '../motion/MotionSurface';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 interface BrandHeaderProps {
@@ -15,6 +16,7 @@ export function BrandHeader({ integrationMode }: BrandHeaderProps): React.JSX.El
   const { width } = useWindowDimensions();
   const reducedMotion = useReducedMotion();
   const [iconSwap] = useState(() => new Animated.Value(1));
+  const [modePulse] = useState(() => new Animated.Value(1));
   const isCompact = width < 620;
   const isDemo = integrationMode === 'web-demo';
 
@@ -36,17 +38,49 @@ export function BrandHeader({ integrationMode }: BrandHeaderProps): React.JSX.El
     return () => animation.stop();
   }, [iconSwap, isDark, reducedMotion]);
 
+  useEffect(() => {
+    modePulse.stopAnimation();
+    if (reducedMotion) {
+      modePulse.setValue(1);
+      return;
+    }
+    const animation = Animated.sequence([
+      Animated.timing(modePulse, {
+        toValue: 1.7,
+        duration: motion.feedback,
+        easing: motion.easeOut,
+        useNativeDriver: motion.nativeDriver,
+      }),
+      Animated.spring(modePulse, {
+        toValue: 1,
+        damping: 17,
+        stiffness: 230,
+        mass: 0.7,
+        useNativeDriver: motion.nativeDriver,
+      }),
+    ]);
+    animation.start();
+    return () => animation.stop();
+  }, [integrationMode, modePulse, reducedMotion]);
+
   return (
     <View style={[styles.header, { borderBottomColor: colors.border }]}>
       <View style={styles.brandRow}>
-        <View style={[styles.logoTile, { backgroundColor: colors.brandMist }]}>
-          <Image
-            accessibilityLabel="Mal"
-            resizeMode="contain"
-            source={require('../../assets/mal-brand-lockup.png')}
-            style={styles.logo}
-          />
-        </View>
+        <MotionSurface
+          accentColor={colors.brandLilac}
+          borderRadius={14}
+          intensity="quiet"
+          style={styles.logoSurface}
+        >
+          <View style={[styles.logoTile, { backgroundColor: colors.brandMist }]}>
+            <Image
+              accessibilityLabel="Mal"
+              resizeMode="contain"
+              source={require('../../assets/mal-brand-lockup.png')}
+              style={styles.logo}
+            />
+          </View>
+        </MotionSurface>
         {!isCompact ? (
           <>
             <View style={[styles.divider, { backgroundColor: colors.borderStrong }]} />
@@ -69,7 +103,15 @@ export function BrandHeader({ integrationMode }: BrandHeaderProps): React.JSX.El
             },
           ]}
         >
-          <View style={[styles.dot, { backgroundColor: isDemo ? colors.accent : colors.success }]} />
+          <Animated.View
+            style={[
+              styles.dot,
+              {
+                backgroundColor: isDemo ? colors.accent : colors.success,
+                transform: [{ scale: modePulse }],
+              },
+            ]}
+          />
           <Text style={[styles.modeText, { color: isDemo ? colors.inkMuted : colors.success }]}>
             {isDemo ? (isCompact ? 'REVIEW' : `${Platform.OS.toUpperCase()} REVIEW`) : 'NATIVE SDK'}
           </Text>
@@ -149,6 +191,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'hidden',
   },
+  logoSurface: { width: 116 },
   logo: { width: 110, height: 47 },
   divider: { width: StyleSheet.hairlineWidth, height: 32 },
   productName: {

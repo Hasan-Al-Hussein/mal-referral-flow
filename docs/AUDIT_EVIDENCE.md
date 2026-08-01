@@ -57,7 +57,7 @@ This audit traces the assessment from baseline `651293d711668300414ae7e228c28d29
 | Branch preview/test and production/live probes | Passed: test maps `apiKey`/`testApiKey`/enabled test mode; live omits `testApiKey` and disables test mode; legacy test alias passed; invalid live/test prefix failed as intended. |
 | Platform-specific Firebase config probes | Passed: EAS Android selected JSON only; EAS iOS selected plist only; missing Android worker file failed as intended. |
 | `npx expo-doctor` | Passed: 21/21 checks. |
-| `npm run build:web` | Passed: Expo exported `dist` from 608 modules. |
+| `npm run build:web` | Passed: Expo exported `dist` from 609 modules. |
 | Windows native wrapper negative preflight | Passed: invokes the installed Expo CLI directly and rejects missing Branch/Firebase input before generation. |
 | Clean fixture-backed Android Prebuild + verifier | Passed: generated Branch runtime config, verified both App Link hosts, install-referrer receiver, test-mode key metadata, Firebase package, and Gradle plugin wiring. |
 | GitHub Actions `native-structure` job | Generates and verifies Android/iOS projects, compiles an Android debug APK, and asserts the artifact exists. The exact run is linked from the repository checks. |

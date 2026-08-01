@@ -23,6 +23,7 @@ import { StatusBanner } from '../components/StatusBanner';
 import { AnimatedReveal } from '../motion/AnimatedReveal';
 import { MotionPressable } from '../motion/MotionPressable';
 import { useReducedMotion } from '../motion/MotionProvider';
+import { MotionSurface } from '../motion/MotionSurface';
 import { motion, radii, typography, useAppTheme } from '../theme/theme';
 
 import type { GeneratedReferral } from '../application/ReferralCoordinator';
@@ -47,6 +48,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
   const { width } = useWindowDimensions();
   const isWide = width >= 1200;
   const heroWide = width >= 680;
+  const compact = width < 520;
   const { coordinator, clearLedger, events } = useReferralRuntime();
   const [referral, setReferral] = useState<GeneratedReferral | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -158,7 +160,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
 
   return (
     <ScreenShell>
-      <View style={styles.page}>
+      <View style={[styles.page, compact && styles.pageCompact]}>
         <PageIntro
           eyebrow="MEMBER REFERRALS"
           title="A trusted introduction, carried all the way through."
@@ -168,19 +170,25 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
         <View style={[styles.columns, !isWide && styles.stacked]}>
           <View style={styles.mainColumn}>
             <AnimatedReveal delay={motion.stagger * 2} distance={18} variant="forward">
-              <LinearGradient
-                colors={
-                  isDark
-                    ? ['#241A35', '#171827', '#182637']
-                    : ['#F7EDFF', '#E8EEFF', '#E4F5FB']
-                }
-                locations={[0, 0.5, 1]}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={[styles.heroCard, { borderColor: colors.border }]}
+              <MotionSurface
+                accentColor={colors.accent}
+                borderRadius={radii.xl}
+                intensity="hero"
+                testID="invite-hero-surface"
               >
-                <View style={[styles.heroLayout, !heroWide && styles.heroStacked]}>
-                  <View style={styles.heroCopy}>
+                <LinearGradient
+                  colors={
+                    isDark
+                      ? ['#241A35', '#171827', '#182637']
+                      : ['#F7EDFF', '#E8EEFF', '#E4F5FB']
+                  }
+                  locations={[0, 0.5, 1]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={[styles.heroCard, compact && styles.heroCardCompact, { borderColor: colors.border }]}
+                >
+                  <View style={[styles.heroLayout, !heroWide && styles.heroStacked]}>
+                  <View style={[styles.heroCopy, compact && styles.heroCopyCompact]}>
                     <View style={styles.memberRow}>
                       <View style={[styles.avatar, { backgroundColor: colors.surfaceGlass }]}>
                         <Text style={[styles.avatarText, { color: colors.accentStrong }]}>{MOCK_USER.initials}</Text>
@@ -196,7 +204,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
 
                     <View>
                       <Text style={[styles.heroEyebrow, { color: colors.accentStrong }]}>YOUR INVITATION</Text>
-                      <Text style={[styles.heroTitle, { color: colors.ink }]}>Share a better way to bank.</Text>
+                      <Text style={[styles.heroTitle, compact && styles.heroTitleCompact, { color: colors.ink }]}>Share a better way to bank.</Text>
                       <Text style={[styles.heroDescription, { color: colors.inkMuted }]}>A personal link that remembers who invited them—even when installation happens between click and signup.</Text>
                     </View>
 
@@ -245,26 +253,30 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
                     <Text style={[styles.orbitCaption, { color: colors.inkMuted }]}>Five milestones. One durable referral identity.</Text>
                   </View>
                 </View>
-              </LinearGradient>
+                </LinearGradient>
+              </MotionSurface>
             </AnimatedReveal>
 
             {referral ? (
               <AnimatedReveal replayKey={referral.url} distance={8}>
-                <View style={[styles.linkBox, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
-                  <View style={[styles.linkIcon, { backgroundColor: colors.accentSoft }]}>
-                    <Feather name="link" color={colors.accentStrong} size={17} />
+                <MotionSurface accentColor={colors.accent} borderRadius={radii.lg} intensity="quiet">
+                  <View style={[styles.linkBox, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
+                    <View style={[styles.linkIcon, { backgroundColor: colors.accentSoft }]}>
+                      <Feather name="link" color={colors.accentStrong} size={17} />
+                    </View>
+                    <View style={styles.linkCopy}>
+                      <Text style={[styles.linkLabel, { color: colors.inkSubtle }]}>SHAREABLE LINK</Text>
+                      <Text selectable numberOfLines={2} style={[styles.link, { color: colors.inkMuted }]}>{referral.url}</Text>
+                    </View>
+                    <Feather name="check-circle" color={colors.success} size={19} />
                   </View>
-                  <View style={styles.linkCopy}>
-                    <Text style={[styles.linkLabel, { color: colors.inkSubtle }]}>SHAREABLE LINK</Text>
-                    <Text selectable numberOfLines={2} style={[styles.link, { color: colors.inkMuted }]}>{referral.url}</Text>
-                  </View>
-                  <Feather name="check-circle" color={colors.success} size={19} />
-                </View>
+                </MotionSurface>
               </AnimatedReveal>
             ) : null}
             {notice ? <StatusBanner {...notice} /> : null}
 
-            <View style={[styles.lab, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
+            <MotionSurface accentColor={colors.accent} borderRadius={radii.lg} intensity="quiet">
+              <View style={[styles.lab, { backgroundColor: colors.surfaceGlass, borderColor: colors.border }]}>
               <MotionPressable
                 aria-expanded={labOpen}
                 accessibilityRole="button"
@@ -338,7 +350,8 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
                   </View>
                 </AnimatedReveal>
               ) : null}
-            </View>
+              </View>
+            </MotionSurface>
 
             {!isWide ? (
               <View style={styles.mobileTrace}>
@@ -372,6 +385,7 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
 
 const styles = StyleSheet.create({
   page: { paddingTop: 42, gap: 36 },
+  pageCompact: { paddingTop: 28, gap: 28 },
   columns: { flexDirection: 'row', alignItems: 'flex-start', gap: 28 },
   stacked: { flexDirection: 'column' },
   mainColumn: { flex: 1.72, minWidth: 0, width: '100%', gap: 16 },
@@ -387,9 +401,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 18 },
     elevation: 6,
   },
+  heroCardCompact: { padding: 20 },
   heroLayout: { flexDirection: 'row', alignItems: 'center', gap: 24 },
   heroStacked: { flexDirection: 'column', alignItems: 'stretch' },
   heroCopy: { flex: 1.2, minWidth: 0, gap: 22, alignItems: 'flex-start' },
+  heroCopyCompact: { gap: 17 },
   memberRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   avatar: { width: 46, height: 46, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontFamily: typography.family, fontSize: 14, fontWeight: '800' },
@@ -399,6 +415,7 @@ const styles = StyleSheet.create({
   memberName: { marginTop: 2, fontFamily: typography.family, fontSize: 15, lineHeight: 21, fontWeight: '700' },
   heroEyebrow: { fontFamily: typography.family, fontSize: 11, lineHeight: 15, fontWeight: '800', letterSpacing: 1.1 },
   heroTitle: { marginTop: 7, fontFamily: typography.family, fontSize: 29, lineHeight: 35, fontWeight: '800', letterSpacing: -0.8 },
+  heroTitleCompact: { fontSize: 26, lineHeight: 32, letterSpacing: -0.55 },
   heroDescription: { marginTop: 9, maxWidth: 520, fontFamily: typography.family, fontSize: 15, lineHeight: 23 },
   codePanel: { width: '100%', borderWidth: 1, borderRadius: radii.lg, padding: 17, gap: 7 },
   codeHeading: { minHeight: 22, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
