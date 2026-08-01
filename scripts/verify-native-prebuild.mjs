@@ -2,7 +2,11 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { loadProjectEnv } from '@expo/env';
-import plist from '@expo/plist';
+import plistModule from '@expo/plist';
+
+// @expo/plist is CommonJS. Node's native ESM interop exposes its API one level
+// below the default import, while Expo's TypeScript config loader unwraps it.
+const plist = plistModule.default ?? plistModule;
 
 const [platform] = process.argv.slice(2);
 const projectRoot = process.cwd();
