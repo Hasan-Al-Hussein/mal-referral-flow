@@ -31,6 +31,7 @@ const JOURNEY_STAGES = REFERRAL_ORBIT_MILESTONES.map((stage, index) => ({
   icon: STAGE_ICONS[index]!,
 }));
 const STEP_COUNT = JOURNEY_STAGES.length;
+const MIN_STAGE_RAIL_WIDTH = 200;
 
 export function ReferralOrbit({
   activeMilestones,
@@ -364,7 +365,7 @@ export function ReferralOrbit({
 
       <View
         accessibilityLabel="Milestones: Create, Share, Click, Start, Verify"
-        style={[styles.stageRail, { width: size }]}
+        style={[styles.stageRail, { width: Math.max(size, MIN_STAGE_RAIL_WIDTH) }]}
       >
         {JOURNEY_STAGES.map((stage, index) => {
           const complete = acceptedStages[index] ?? false;
@@ -457,14 +458,14 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     elevation: 8,
   },
-  stageRail: { flexDirection: 'row', gap: 4, marginTop: 5 },
+  stageRail: { flexDirection: 'row', gap: 2, marginTop: 6 },
   stageCell: { flex: 1, minWidth: 0, alignItems: 'center', gap: 5 },
   stageTick: { width: '100%', height: 3, borderRadius: 2 },
   stageLabel: {
     fontFamily: typography.family,
-    fontSize: 8.5,
-    lineHeight: 11,
-    letterSpacing: 0.45,
+    fontSize: 10,
+    lineHeight: 13,
+    letterSpacing: 0.1,
   },
-  stageLabelCompact: { fontSize: 7, lineHeight: 9, letterSpacing: 0.2 },
+  stageLabelCompact: { fontSize: 10, lineHeight: 13, letterSpacing: 0 },
 });

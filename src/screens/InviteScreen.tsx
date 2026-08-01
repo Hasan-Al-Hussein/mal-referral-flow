@@ -13,6 +13,7 @@ import {
 import { commitDemoReset } from '../application/commitDemoReset';
 import { getAcceptedReferralMilestones } from '../application/referralProgress';
 import { useReferralRuntime } from '../application/ReferralRuntime';
+import { runReferralShare } from '../application/runReferralShare';
 import { Button } from '../components/Button';
 import { EventLedger } from '../components/EventLedger';
 import { PageIntro } from '../components/PageIntro';
@@ -108,24 +109,11 @@ export function InviteScreen({ navigation }: Props): React.JSX.Element {
 
   const share = async () => {
     if (!referral) return;
-    setNotice(null);
-    setIsSharing(true);
-    const result = await coordinator.shareReferral(referral);
-    setIsSharing(false);
-    if (result.status === 'shared') {
-      setNotice({
-        tone: 'success',
-        title: result.channel === 'clipboard' ? 'Invite copied' : 'Share sheet opened',
-        message:
-          result.channel === 'clipboard'
-            ? 'Web Share is unavailable here, so the complete invite was copied to your clipboard.'
-            : 'The shared milestone was recorded only after the share action completed.',
-      });
-    } else if (result.status === 'cancelled') {
-      setNotice({ tone: 'info', title: 'Share cancelled', message: 'No success event was recorded.' });
-    } else {
-      setNotice({ tone: 'error', title: 'Share failed', message: result.reason });
-    }
+    await runReferralShare({
+      executeShare: () => coordinator.shareReferral(referral),
+      setNotice,
+      setSharing: setIsSharing,
+    });
   };
 
   const simulate = (kind: 'direct' | 'deferred' | 'invalid') => {
